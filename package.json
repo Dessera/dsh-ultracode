@@ -1,8 +1,14 @@
 {
     "name": "@dessera/dsh-ultracode",
     "version": "0.1.0",
-    "private": true,
     "description": "Ultracode session mode for DeepSeek Harness: a three-position composer control that arms automatic multi-agent workflow orchestration by injecting an arming banner ahead of the user's own message.",
+    "author": "Dessera <dessera@qq.com> (https://github.com/Dessera)",
+    "repository": {
+        "type": "git",
+        "url": "git+https://github.com/Dessera/dsh-ultracode.git"
+    },
+    "homepage": "https://github.com/Dessera/dsh-ultracode#readme",
+    "bugs": "https://github.com/Dessera/dsh-ultracode/issues",
     "type": "module",
     "engines": {
         "node": "^22.19.0 || >=24.0.0"
@@ -19,6 +25,7 @@
         "./package.json": "./package.json"
     },
     "files": [
+        "docs",
         "lib",
         "cordis.patch.yml"
     ],
@@ -43,7 +50,8 @@
         "test": "node --test \"test/*.test.mjs\"",
         "clean": "rm -rf lib",
         "check": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm build && pnpm test",
-        "prepare": "tsdown"
+        "prepare": "tsdown",
+        "prepublishOnly": "pnpm check"
     },
     "keywords": [
         "deepseek-harness",
@@ -53,6 +61,9 @@
         "ultracode",
         "workflow"
     ],
+    "publishConfig": {
+        "access": "public"
+    },
     "license": "MIT",
     "devDependencies": {
         "@deepseek-ai/cordis": "4.0.2",

@@ -15,13 +15,23 @@ DeepSeek Harness（DSH）的 ultracode 会话模式。它在输入框（composer
 
 ## 安装
 
-这个包是私有的，没有发布到 npm，所以 DSH 直接从它的 Git 仓库安装：
+DSH 从 npm 安装这个插件：
+
+```sh
+dsh plugin --profile web add @dessera/dsh-ultracode
+```
+
+把 `web` 换成你实际使用的 profile 名称。发布出去的包已经带了构建产物，所以安装过程不执行构建脚本，也不会要求你放行任何东西。如果想停在某一个版本上，可以写明确切版本号，例如 `dsh plugin --profile web add @dessera/dsh-ultracode@0.1.0`，这样部署就一直用这个版本，而不是跟着最新的走。
+
+想试某个还没有发布的提交，就改成从 Git 仓库安装：
 
 ```sh
 dsh plugin --profile web add github:Dessera/dsh-ultracode
 ```
 
-把 `web` 换成你实际使用的 profile 名称。仓库里只有源码，因此 pnpm 会在安装过程中构建这个插件。pnpm 默认拦下这个构建，直到你放行：如果命令报告某个构建脚本被忽略，就把它打印出来的那个键名原样加到该 profile 的 `pnpm-workspace.yaml`（通常位于 `~/.dsh/profiles/<profile>/pnpm-workspace.yaml`）里的 `allowBuilds` 下面，然后重新执行同一条命令。之后要重启 DSH 宿主，因为插件在启动时加载；控件会在下一个会话的输入框里出现。
+仓库里只有源码，因此 pnpm 会在安装过程中构建这个插件，并默认拦下这个构建，直到你放行：如果命令报告某个构建脚本被忽略，就把它打印出来的那个键名原样加到该 profile 的 `pnpm-workspace.yaml`（通常位于 `~/.dsh/profiles/<profile>/pnpm-workspace.yaml`）里的 `allowBuilds` 下面，然后重新执行同一条命令。
+
+两种装法之后都要重启 DSH 宿主，因为插件在启动时加载；控件会在下一个会话的输入框里出现。
 
 ## 构建
 
@@ -39,6 +49,28 @@ pnpm check      # the full gate: formatting, lint, typecheck, build, tests
 ## 持续集成
 
 每次推送到 `main` 以及每个拉取请求都会运行 `.github/workflows/ci.yml`：它在 Node.js 22.x 与 24.x 上执行 `pnpm check`。运行器上本来没有 DSH 安装，所以这一趟还会按本仓库固定的版本，装好 `test/contract-probe.test.mjs` 所校验的那套宿主。
+
+## 发布
+
+发布到 npm 的版本号是部署端解析的锚点。npm 上的版本一经发布就不能被替换，所以每次发布都要用一个新版本号，并在它所对应的那个提交上打一个 tag。一次发布按下面的顺序进行：
+
+```sh
+pnpm check                     # lint、格式检查、类型检查、构建、测试
+pnpm version patch             # 升版本号、生成提交、打 vX.Y.Z 注解 tag
+git push --follow-tags         # 提交与 tag 一起推上去
+pnpm publish                   # 发布的就是已提交的那棵树
+```
+
+`pnpm version` 接受 `patch`、`minor`、`major`，也可以直接给一个版本号；它会在自己生成的提交上打一个名为 `vX.Y.Z` 的注解 tag。如果发布流程由别的工具组装，用 `--no-git-tag-version` 把自动提交与自动打 tag 都关掉。`pnpm publish` 要求工作区干净、当前分支是发布分支、并且与远程同步，否则会直接拒绝执行；这条检查保证被 tag 的提交与发布出去的压缩包是同一棵树。首次发布不需要升版本号，因为 `package.json` 里已经写好了版本号：给那个提交打上 tag 再发布，这一次发布就完成了。
+
+预发布版本发布到 `next` 这个 dist-tag，而不是 `latest`：
+
+```sh
+pnpm version prerelease --preid beta   # 0.2.0 变成 0.2.0-beta.0
+pnpm publish --tag next
+```
+
+每次发布都在对应的 GitHub Release 说明里记下它是针对哪一版 DSH 构建和测试的。`devDependencies` 里的 DSH 包固定在 `0.1.6-alpha.2`，而这个系列仍带 alpha 后缀，所以这里记的是一个确切的版本而不是一个范围：更新的 DSH 在测试套件对它跑通之前都属于未验证。
 
 ## 来源与致谢
 

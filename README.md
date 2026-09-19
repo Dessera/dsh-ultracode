@@ -16,13 +16,23 @@ sides exchange — is described in [docs/architecture.md](docs/architecture.md).
 
 ## Install
 
-The package is private and is not published to npm, so DSH installs it straight from its Git repository:
+DSH installs the plugin from npm:
+
+```sh
+dsh plugin --profile web add @dessera/dsh-ultracode
+```
+
+Replace `web` with the name of the profile you run. The published package carries the built artifacts, so installing it runs no build script and asks for no permission. Naming an exact version, as in `dsh plugin --profile web add @dessera/dsh-ultracode@0.1.0`, holds a deployment at one release instead of following whatever is newest.
+
+To try a commit that has not been released yet, install from the Git repository instead:
 
 ```sh
 dsh plugin --profile web add github:Dessera/dsh-ultracode
 ```
 
-Replace `web` with the name of the profile you run. The repository carries sources only, so pnpm builds the plugin while installing it. pnpm blocks that build until it is allowed: if the command reports an ignored build script, add the exact key it printed under `allowBuilds` in the profile's `pnpm-workspace.yaml` (normally `~/.dsh/profiles/<profile>/pnpm-workspace.yaml`) and run the same command again. Restart the DSH host afterwards, because plugins are loaded at startup, and the control then appears in the composer of the next session.
+That checkout carries sources only, so pnpm builds the plugin while installing it, and pnpm blocks that build until it is allowed: if the command reports an ignored build script, add the exact key it printed under `allowBuilds` in the profile's `pnpm-workspace.yaml` (normally `~/.dsh/profiles/<profile>/pnpm-workspace.yaml`) and run the same command again.
+
+Restart the DSH host after either install, because plugins are loaded at startup; the control then appears in the composer of the next session.
 
 ## Build
 
@@ -40,6 +50,28 @@ The build writes two artifacts: `lib/index.js` is the host part, which runs in N
 ## Continuous integration
 
 Every push to `main` and every pull request runs `.github/workflows/ci.yml`, which executes `pnpm check` on Node.js 22.x and 24.x. That run installs the harness `test/contract-probe.test.mjs` asserts against, at the versions this repository pins, because a runner has no DSH installation of its own.
+
+## Release
+
+The version published to npm is the anchor a deployment resolves, and npm never lets a published version be replaced, so every release takes a new number and a tag on the commit it was built from. A release runs in this order:
+
+```sh
+pnpm check                     # lint, format check, typecheck, build, tests
+pnpm version patch             # bumps the version, commits it, tags vX.Y.Z
+git push --follow-tags         # the commit and its tag travel together
+pnpm publish                   # publishes the tree that was committed
+```
+
+`pnpm version` accepts `patch`, `minor`, `major`, or an explicit version, and puts an annotated tag named `vX.Y.Z` on the commit it creates. `--no-git-tag-version` skips both the commit and the tag, for a release assembled by other means. `pnpm publish` refuses to run unless the working tree is clean, the checkout is on the publish branch, and it is level with its remote; that check is what keeps the tagged commit and the published tarball the same tree. The first release needs no bump, because `package.json` already carries its version: tagging that commit and publishing it is the whole release.
+
+A prerelease goes to the `next` dist-tag rather than `latest`:
+
+```sh
+pnpm version prerelease --preid beta   # 0.2.0 becomes 0.2.0-beta.0
+pnpm publish --tag next
+```
+
+Each release records the DSH version it was built and tested against, in the notes of its GitHub Release. The DSH packages in `devDependencies` are fixed at `0.1.6-alpha.2`, and that series still carries an alpha suffix, so a release names the exact version instead of a range: a newer DSH stays unverified until the suites have run against it.
 
 ## Sources and acknowledgements
 
