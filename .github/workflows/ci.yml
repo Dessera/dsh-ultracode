@@ -32,10 +32,6 @@ jobs:
             fail-fast: false
             matrix:
                 node: ["22.x", "24.x"]
-        env:
-            # The probe resolves the harness through `DSH_HOME`. The tree is built
-            # outside the checkout, so no repository tool scans it.
-            DSH_HOME: ${{ runner.temp }}/dsh-harness
         steps:
             - uses: actions/checkout@v7
 
@@ -52,10 +48,14 @@ jobs:
               run: pnpm install --frozen-lockfile
 
             - name: Provision the harness the runtime contract probe reads
+              # The tree goes under the runner's temporary directory rather than into the
+              # checkout, so no repository tool scans it. It is named through `DSH_HOME`,
+              # the variable that already points at the directory playing the role
+              # `~/.dsh` plays on a developer's machine.
               run: |
                   set -euo pipefail
                   version=0.1.6-alpha.2
-                  anchor="$DSH_HOME/profiles/web"
+                  anchor="$RUNNER_TEMP/dsh-harness/profiles/web"
                   mkdir -p "$anchor"
                   npm install --prefix "$anchor" --no-save --no-audit --no-fund \
                       "@deepseek-ai/dsh-agent-loop@$version" \
@@ -77,6 +77,7 @@ jobs:
                   # probe resolves the rest from, so the same tree is exposed at the
                   # second location too.
                   ln -s "$anchor/node_modules/@deepseek-ai" "$anchor/@deepseek-ai"
+                  echo "DSH_HOME=$RUNNER_TEMP/dsh-harness" >> "$GITHUB_ENV"
 
             - name: Run the gate
               run: pnpm check
