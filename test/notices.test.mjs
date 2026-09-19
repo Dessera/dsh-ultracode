@@ -17,15 +17,12 @@ import { LEVELS, LEVEL_WORDS, levelLabel } from "../src/host/protocol.ts";
 
 const LANGUAGES = ["zh", "en"];
 
-/** The word each language uses for the marker the clear command drops. */
-const ARMED_MARKER = { zh: "武装", en: "armed" };
-
 for (const language of LANGUAGES) {
     test(`the ${language} usage line names every level word the command accepts`, () => {
         const { usage } = NOTICES[language];
-        // Word boundaries, because every level word is also a substring of
-        // "ultracode" itself, so a plain containment test would pass on a usage
-        // line that had silently dropped a word.
+        // Word boundaries, because `ultra` is also a substring of "ultracode"
+        // itself, so a plain containment test for that word would pass on a usage
+        // line that had silently dropped it.
         for (const word of LEVEL_WORDS.split(" | ")) {
             assert.match(
                 usage,
@@ -58,42 +55,27 @@ for (const language of LANGUAGES) {
         );
     });
 
-    test(`the ${language} status line separates an all-true call from an all-false one`, () => {
+    test(`the ${language} status line separates an available tool from an unavailable one`, () => {
         const { status } = NOTICES[language];
         const level = levelLabel("ultra", language);
-        const allOff = status(level, false, false, false);
-        assert.notEqual(status(level, true, true, true), allOff);
-        // One flag at a time, because a field rendered from the wrong flag
-        // leaves the line unchanged exactly when that flag flips alone.
-        assert.notEqual(status(level, true, false, false), allOff);
-        assert.notEqual(status(level, false, true, false), allOff);
-        assert.notEqual(status(level, false, false, true), allOff);
+        assert.notEqual(status(level, true), status(level, false));
     });
 
     test(`the ${language} status line reports the level it was handed`, () => {
         const level = levelLabel("high", language);
-        assert.ok(
-            NOTICES[language]
-                .status(level, false, false, false)
-                .includes(level),
-        );
+        assert.ok(NOTICES[language].status(level, false).includes(level));
     });
 
     // Pinned word for word, because the checks above read differences: a field
     // whose two words are simply exchanged, or a reworded sentence, still
     // differs from its neighbours and only a golden string notices.
-    test(`the ${language} status line reads a mixed call out word for word`, () => {
+    test(`the ${language} status line reads a call out word for word`, () => {
         const expected = {
-            zh: "Ultracode 档位：极致；关键词触发：开；本轮武装：否；workflow 工具：可见。",
-            en: "Ultracode level: ultra; keyword trigger: on; this turn armed: no; workflow tool: visible.",
+            zh: "Ultracode 档位：极致；workflow 工具：可见。",
+            en: "Ultracode level: ultra; workflow tool: visible.",
         };
         assert.equal(
-            NOTICES[language].status(
-                levelLabel("ultra", language),
-                true,
-                false,
-                true,
-            ),
+            NOTICES[language].status(levelLabel("ultra", language), true),
             expected[language],
         );
     });
@@ -110,10 +92,6 @@ for (const language of LANGUAGES) {
                 `${language} omits ${level}`,
             );
         }
-    });
-
-    test(`the ${language} cleared notice names the armed marker it drops`, () => {
-        assert.ok(NOTICES[language].cleared.includes(ARMED_MARKER[language]));
     });
 
     test(`the ${language} unavailable notice names the workflow tool`, () => {

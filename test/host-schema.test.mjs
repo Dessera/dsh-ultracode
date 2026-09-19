@@ -19,12 +19,10 @@ import { Config } from "../src/host/schema.ts";
  *
  * Derived from the resolver rather than listed here, so a field added to one
  * half without the other shows up as a mismatch instead of passing unseen.
- * @returns the shared field names, without the derived state path.
+ * @returns the shared field names.
  */
 function sharedFields() {
-    return Object.keys(resolveConfig(undefined)).filter(
-        (field) => field !== "statePath",
-    );
+    return Object.keys(resolveConfig(undefined));
 }
 
 test("the schema applies the same defaults a missing configuration resolves to", () => {
@@ -39,14 +37,14 @@ test("the schema applies the same defaults a missing configuration resolves to",
 });
 
 test("a partial configuration keeps the same remaining defaults on both sides", () => {
-    const partial = { keywordTrigger: true };
+    const partial = { language: "en" };
     const parsed = Config(partial);
     const resolved = resolveConfig(partial);
 
-    assert.equal(parsed.keywordTrigger, true);
-    assert.equal(resolved.keywordTrigger, true);
+    assert.equal(parsed.language, "en");
+    assert.equal(resolved.language, "en");
     for (const field of sharedFields()) {
-        if (field === "keywordTrigger") continue;
+        if (field === "language") continue;
         assert.deepEqual(
             parsed[field],
             resolved[field],

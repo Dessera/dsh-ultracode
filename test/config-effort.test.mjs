@@ -10,38 +10,16 @@ import { EffortResolver, withEffortPlan } from "../src/host/effort.ts";
 test("a missing configuration resolves to the documented defaults", () => {
     const config = resolveConfig(undefined);
     assert.equal(config.workflowToolName, "workflow");
-    assert.equal(config.keywordTrigger, false);
-    assert.deepEqual(config.keywords, ["ultracode"]);
     assert.equal(config.language, "zh");
-    assert.equal(config.statePath, "/dsh-ultracode/state");
 });
 
 test("a partial configuration keeps the remaining defaults", () => {
     const config = resolveConfig({
         workflowToolName: "workflows",
-        keywordTrigger: true,
+        language: "en",
     });
     assert.equal(config.workflowToolName, "workflows");
-    assert.equal(config.keywordTrigger, true);
-    assert.deepEqual(config.keywords, ["ultracode"]);
-});
-
-test("blank keywords and aliases are dropped, and the route prefix is normalized", () => {
-    const config = resolveConfig({
-        keywords: ["", "  ", "go"],
-        extraLevels: ["", "  ", " max "],
-        routePrefix: "uc",
-    });
-    assert.deepEqual(config.keywords, ["go"]);
-    assert.deepEqual(config.extraLevels, ["max"]);
-    assert.equal(config.routePrefix, "/uc");
-    assert.equal(config.statePath, "/uc/state");
-});
-
-test("a blank route prefix falls back to the default instead of an empty path", () => {
-    const config = resolveConfig({ routePrefix: "  " });
-    assert.equal(config.routePrefix, "/dsh-ultracode");
-    assert.equal(config.statePath, "/dsh-ultracode/state");
+    assert.equal(config.language, "en");
 });
 
 test("only the exact English tag selects English, anything else stays Chinese", () => {
@@ -51,12 +29,8 @@ test("only the exact English tag selects English, anything else stays Chinese", 
 });
 
 test("a field of the wrong shape falls back to its own default", () => {
-    const config = resolveConfig({
-        keywords: "ultracode",
-        keywordTrigger: "always",
-    });
-    assert.deepEqual(config.keywords, ["ultracode"]);
-    assert.equal(config.keywordTrigger, false);
+    const config = resolveConfig({ workflowToolName: 42 });
+    assert.equal(config.workflowToolName, "workflow");
 });
 
 test("an empty tool name is rejected at load time", () => {
@@ -79,7 +53,7 @@ test("the pinned effort is the last effort the route reports", async () => {
         },
     }));
     const plan = await resolver.pinFor({ provider: "p", model: "m" });
-    assert.deepEqual(plan, { effort: "max", adapterDefault: false });
+    assert.deepEqual(plan, { effort: "max" });
 });
 
 test("the pinned effort is the last declared non-off entry when the order runs strongest first", async () => {
@@ -94,7 +68,6 @@ test("the pinned effort is the last declared non-off entry when the order runs s
     }));
     assert.deepEqual(await resolver.pinFor({ provider: "p", model: "m" }), {
         effort: "minimal",
-        adapterDefault: false,
     });
 });
 
@@ -126,39 +99,22 @@ test("an explicit effort overrides the reported strongest one", async () => {
     );
     assert.deepEqual(await resolver.pinFor({ provider: "p", model: "m" }), {
         effort: "medium",
-        adapterDefault: false,
     });
 });
 
-test("the release plan restores the remembered effort with its adapter flag", () => {
+test("the release plan restores the remembered effort", () => {
     const resolver = new EffortResolver(async () => ({}));
-    assert.deepEqual(
-        resolver.restorePlan({ effort: "low", adapterDefault: true }),
-        {
-            effort: "low",
-            adapterDefault: true,
-        },
-    );
+    assert.deepEqual(resolver.restorePlan({ effort: "low" }), {
+        effort: "low",
+    });
 });
 
 test("a session with no remembered effort clears the field on release", () => {
     const resolver = new EffortResolver(async () => ({}));
     assert.deepEqual(resolver.restorePlan(undefined), { effort: undefined });
-    assert.deepEqual(
-        resolver.restorePlan({ effort: "", adapterDefault: false }),
-        { effort: undefined },
-    );
-});
-
-test("a caller-proposed release carries no adapter-default key", () => {
-    const resolver = new EffortResolver(async () => ({}));
-    // An explicit `false` would add a header field that a session running
-    // without this plugin would not have, so the key must be absent instead.
-    const plan = resolver.restorePlan({
-        effort: "high",
-        adapterDefault: false,
+    assert.deepEqual(resolver.restorePlan({ effort: "" }), {
+        effort: undefined,
     });
-    assert.deepEqual(plan, { effort: "high" });
 });
 
 test("applying a plan changes only the effort fields", () => {
@@ -198,20 +154,19 @@ test("an unchanged plan keeps the original object", () => {
     assert.equal(withEffortPlan(config, { effort: "max" }), config);
 });
 
-test("an adapter-default release writes the flag and keeps the value", () => {
+test("a plan never writes an adapter-default marker", () => {
     const config = {
         provider: "p",
         model: "m",
         reasoningEffort: "max",
         adapterDefaults: { maxTokens: 10 },
     };
-    assert.deepEqual(
-        withEffortPlan(config, { effort: "low", adapterDefault: true }),
-        {
-            provider: "p",
-            model: "m",
-            reasoningEffort: "low",
-            adapterDefaults: { maxTokens: 10, reasoningEffort: true },
-        },
-    );
+    // The harness recomputes that marking from whether the caller supplied the
+    // field, so an applied plan leaves any marking it finds exactly as it was.
+    assert.deepEqual(withEffortPlan(config, { effort: "low" }), {
+        provider: "p",
+        model: "m",
+        reasoningEffort: "low",
+        adapterDefaults: { maxTokens: 10 },
+    });
 });

@@ -9,10 +9,11 @@
  * which a level could reach the screen.
  *
  * That is what makes the two failure modes of the earlier design impossible.
- * The control cannot go missing because it never renders nothing: a session
- * whose value has not arrived yet shows an explicit connecting state. And it
- * cannot drift from the command, because the command is the only writer and the
- * projection is the only reader.
+ * The control never shows a level it derived itself: a session whose value has
+ * not arrived yet shows an explicit connecting state, while a session that cannot
+ * carry a control at all — one that was removed, or a delegated child — renders
+ * nothing on purpose. And it cannot drift from the command, because the command is
+ * the only writer and the projection is the only reader.
  *
  * @module @dessera/dsh-ultracode/client/UltracodeControl
  */
@@ -37,7 +38,11 @@ import type { UltracodeKey } from "./locales.ts";
  */
 export type UltracodeControlProps = UltracodeChipProps;
 
-/** Fallback text used when the locale registry has no entry for a key. */
+/**
+ * Fallback text used when the props carry no `t` seat at all. A dictionary miss
+ * never reaches this table: the harness's own translate answers the raw key text
+ * rather than undefined.
+ */
 const FALLBACK: Record<string, string> = {
     "chip.off": "Ultracode off",
     "chip.high": "Ultracode high",
@@ -54,7 +59,6 @@ const FALLBACK: Record<string, string> = {
     "chip.title.connecting":
         "The host has not published a level yet; a click runs one /ultracode command",
     "chip.busy": "Applying…",
-    "chip.armed": "trigger word",
     "error.action": "Could not change the Ultracode level",
 };
 
@@ -88,7 +92,6 @@ const STYLES: Record<string, CSSProperties> = {
         background: "currentColor",
         opacity: 0.85,
     },
-    armed: { fontSize: 11, opacity: 0.75 },
     error: {
         color: "var(--dsw-alias-state-error-primary, #d33)",
         fontSize: 12,
@@ -99,9 +102,10 @@ const STYLES: Record<string, CSSProperties> = {
 /**
  * Read the host's published value through the projection hook.
  *
- * The hook is optional because a host that mounts this seat without a session
- * source must still render a working control; an absent hook and an absent
- * value are the same thing to the chip, which is "nothing published yet".
+ * The hook is read defensively even though the harness always supplies one for a
+ * session-scope seat — a seat rendered without a standard-source binding fails
+ * loud instead — so only the value it answers can be missing. To the chip an
+ * absent hook and an absent value are the same thing: "nothing published yet".
  * @param props - the control's props.
  * @returns the published value, or undefined when none arrived.
  */
@@ -170,10 +174,11 @@ export function UltracodeControl(
 ): ReactElement | null {
     const { sessionId, changeLevel } = props;
     // The locale seat's `t` is typed against this plugin's dictionary, so a
-    // mistyped key is a build error. It is still read through an optional call:
-    // the seat comes from the harness, so a host that composes these props without
-    // this plugin's namespace registered leaves the member absent at runtime, and
-    // the fallback table is what keeps the chip readable in that case.
+    // mistyped key is a build error. It is still read through an optional call,
+    // because the props can be composed outside the slot renderer: the harness
+    // itself always synthesizes `t` for a registration that declares a locale
+    // namespace, and a composition with no locale face installed fails loud rather
+    // than rendering this seat without it.
     const t = (key: UltracodeKey): string =>
         props.t?.(key) ?? FALLBACK[key] ?? key;
 
@@ -230,9 +235,6 @@ export function UltracodeControl(
             >
                 <span style={STYLES.dot} aria-hidden />
                 {label}
-                {view.keywordArmed ? (
-                    <span style={STYLES.armed}>{t("chip.armed")}</span>
-                ) : null}
             </button>
             {failure !== null ? (
                 <span style={STYLES.error} role="alert" title={failure}>

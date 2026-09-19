@@ -78,18 +78,6 @@ const HOST_SERVICES = [
         marker: 'super(ctx, "llm")',
     },
     {
-        key: "agents",
-        provider: "@deepseek-ai/dsh-agent",
-        entry: "lib/index.js",
-        marker: 'super(ctx, "agents")',
-    },
-    {
-        key: "webServer",
-        provider: "@deepseek-ai/dsh-host-webserver",
-        entry: "lib/index.js",
-        marker: 'super(ctx, "webServer")',
-    },
-    {
         key: "sessionProjections",
         provider: "@deepseek-ai/dsh-session-projection",
         entry: "lib/index.js",
@@ -108,11 +96,12 @@ const HOST_SERVICES = [
  *
  * What remains here is what the compiler does not cover. The seat key, the
  * standard props and the projection tables are all imported types now, so a
- * rename of those fails the build. These entries are the rest: names the plugin
- * never writes in code — the seat the composer creates, the slot service the
- * renderer provides, the locale runtime the locale package creates, and the
- * `slots`, `locale`, `remote` and `remote.commands` services the client's inject
- * list is answered by — plus the runtime shape the composer gives that seat, and
+ * rename of those fails the build. These entries are the rest: runtime names
+ * whose definitions live in the packages that publish them — the seat the
+ * composer creates, the slot service the renderer provides, the locale runtime
+ * the locale package creates, and the `slots`, `locale`, `remote` and
+ * `remote.commands` services the client's inject list is answered by — plus the
+ * runtime shape the composer gives that seat, and
  * the one derivation rule the value depends on: the prop name a projection key
  * turns into is computed at runtime, so a change to that rule is invisible to the
  * type system.
@@ -204,16 +193,6 @@ const LOG_EVENTS = [
         entry: "lib/index.js",
     },
     {
-        name: "turn/start",
-        provider: "@deepseek-ai/dsh-agent-loop",
-        entry: "lib/index.js",
-    },
-    {
-        name: "turn/end",
-        provider: "@deepseek-ai/dsh-agent-loop",
-        entry: "lib/index.js",
-    },
-    {
         name: "user/message",
         provider: "@deepseek-ai/dsh-agent-loop",
         entry: "lib/index.js",
@@ -223,7 +202,7 @@ const LOG_EVENTS = [
 /** One session accessor the host half reads from a live agent. */
 const SESSION_ACCESSORS = [
     {
-        what: "the request header accessor the plugin reads for the effort and route",
+        what: "the request header accessor the plugin reads for the reasoning effort",
         provider: "@deepseek-ai/dsh-session",
         entry: "lib/types/index.d.ts",
         marker: "requestHeader()",

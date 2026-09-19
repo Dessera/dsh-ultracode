@@ -1,10 +1,15 @@
 # @dessera/dsh-ultracode
 
-Ultracode session mode for DeepSeek Harness (DSH). It adds a three-position control to the composer: the position selects the level a session runs at, and an armed level makes the workflow tool DSH provides available to the turns that follow while pinning the session to the strongest reasoning effort the current model reports.
+Ultracode session mode for DeepSeek Harness (DSH). It adds a three-position control to the composer: the position selects the level a session runs at, and an armed level makes the workflow tool DSH provides available to the turns that follow while pinning the session's requests to the strongest reasoning effort the model reports when the level is armed.
 
-- `off` leaves a session exactly as DSH ships it, and restores the effort the session was running before the first arming.
-- `high` and `ultra` inject an arming banner ahead of the user's own message, so the model learns that the turn is authorised for multi-agent orchestration rather than being forced into it.
-- The level belongs to one session and is recovered from that session's own command history after a host restart. `/ultracode` advances the level, `/ultracode status` prints the level and whether the current turn is armed, and `/ultracode clear` drops the armed marker of the current turn.
+- `off` leaves a session exactly as DSH ships it, and restores the effort the session was running before the first arming; when a host restart has discarded that baseline, the release clears the effort field instead, so the request falls back to the model's own default.
+- `high` and `ultra` inject an arming banner directly after the user's own message, so the model learns that the turn is authorised for multi-agent orchestration rather than being forced into it.
+- The level belongs to one session and is recovered after a host restart from that session's own log: from its `/ultracode` command history, or, while that log carries no level command, from the banner message the plugin itself injected. `/ultracode` advances the level, and `/ultracode status` prints the level and whether the workflow tool is visible to the session.
+
+## Architecture
+
+How the plugin is put together — the two halves, the state model, the command surface, the wire
+contract, the effort pin and its limits — is described in [docs/architecture.md](docs/architecture.md).
 
 ## Install
 
@@ -18,7 +23,7 @@ Replace `web` with the name of the profile you run. The repository carries sourc
 
 ## Build
 
-A checkout builds with Node.js 22.19 or newer, or Node.js 24 and newer, and with pnpm. The exact pnpm version is pinned in `packageManager`, so `corepack pnpm` runs the pinned one without a global install.
+A checkout builds with Node.js 22.19 or newer within the 22 line, or with Node.js 24 and newer, and with pnpm. The exact pnpm version is pinned in `packageManager`, so `corepack pnpm` runs the pinned one without a global install.
 
 ```sh
 pnpm install    # installs dependencies and builds, because the prepare script runs tsdown

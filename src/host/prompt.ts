@@ -1,15 +1,14 @@
 /**
  * Injection text assembly.
  *
- * Every string this module produces is generated from plugin-owned constants
- * and one enumerated reason value. No repository text, file content, or user
- * input is interpolated into the banner, so a workspace file cannot close the
- * bracketed block or address the model through this channel.
+ * Every string this module produces is generated from plugin-owned constants.
+ * No repository text, file content, or user input is interpolated into the
+ * banner, so a workspace file cannot close the bracketed block or address the
+ * model through this channel.
  *
  * @module @dessera/dsh-ultracode/prompt
  */
 import type { UltracodeLevel } from "./protocol.ts";
-import type { ArmReason } from "./reducer.ts";
 
 /**
  * Marker opening the banner block, kept stable for readers and tests.
@@ -46,13 +45,6 @@ export const FORBIDDEN_SCRIPT_NAMES: readonly string[] = [
     "tokenBudget",
 ];
 
-/** Why a turn was armed, spelled out as one clause. */
-const REASON_CLAUSE: Readonly<Record<ArmReason, string>> = {
-    keyword:
-        "you typed the ultracode trigger word, which counts as your explicit opt-in to multi-agent orchestration",
-    level: "standing ultracode mode armed this turn (you did not explicitly ask for a workflow)",
-};
-
 /**
  * Effort instruction for the high level.
  *
@@ -85,7 +77,7 @@ const ULTRA_INSTRUCTION = [
     "scope the sweep deliberately and report the coverage limits you actually achieved.",
 ].join("\n");
 
-/** Escape hatch appended only when the standing level, not the user, armed the turn. */
+/** Escape hatch every armed turn carries, so the banner never forces a workflow. */
 const ESCAPE_SENTENCE = [
     "",
     "This turn was armed by standing ultracode mode, not by an explicit workflow request: if it",
@@ -94,10 +86,9 @@ const ESCAPE_SENTENCE = [
 
 /**
  * Build the banner inserted ahead of the user's own message.
- * @param reason - why the turn is armed.
  * @returns the banner text.
  */
-export function buildBanner(reason: ArmReason): string {
+export function buildBanner(): string {
     return [
         "---",
         `${BANNER_OPEN} Decide first: if this message is a question, a trivial task, or`,
@@ -105,52 +96,44 @@ export function buildBanner(reason: ArmReason): string {
         "conversational — arming authorizes the tool, it does not force it. If it is a real,",
         "decomposable request to do work, handle it by calling the workflow tool: write a script",
         `that fans the task out across subagents via ${SCRIPT_SURFACE.join("/")}.`,
-        `Why this turn is armed: ${REASON_CLAUSE[reason]}.${BANNER_CLOSE}`,
+        "Why this turn is armed: standing ultracode mode armed this turn (you did not",
+        `explicitly ask for a workflow).${BANNER_CLOSE}`,
     ].join("\n");
 }
 
 /**
  * Build the effort instruction for one armed level.
  *
- * The standing level path appends the escape sentence, because the user did
- * not ask for orchestration in so many words; the keyword path does not,
- * because the trigger word is the request.
+ * Every armed turn carries the escape sentence, because the level arms turns
+ * standing rather than per request: the user asked for the mode, not for a
+ * workflow on this particular message.
  * @param level - the armed level, which must not be `off`.
- * @param reason - why the turn is armed.
  * @returns the instruction text, or the empty string for the `off` level.
  */
-export function buildInstruction(
-    level: UltracodeLevel,
-    reason: ArmReason,
-): string {
+export function buildInstruction(level: UltracodeLevel): string {
     if (level === "off") return "";
     const body = level === "ultra" ? ULTRA_INSTRUCTION : HIGH_INSTRUCTION;
-    return reason === "level" ? `${body}${ESCAPE_SENTENCE}` : body;
+    return `${body}${ESCAPE_SENTENCE}`;
 }
 
 /**
  * Assemble the complete injected block for one armed turn.
  * @param level - the armed level.
- * @param reason - why the turn is armed.
  * @returns the banner followed by the level instruction.
  */
-export function buildInjection(
-    level: UltracodeLevel,
-    reason: ArmReason,
-): string {
-    return `${buildBanner(reason)}\n\n${buildInstruction(level, reason)}`;
+export function buildInjection(level: UltracodeLevel): string {
+    return `${buildBanner()}\n\n${buildInstruction(level)}`;
 }
 
 /**
  * One line recording which turn this block belongs to, so a transcript reader
  * can tell an armed turn from an unarmed one without re-deriving the level.
+ *
+ * The fold reads the level back out of this line, which is what carries a
+ * session's level across a host restart when its log carries no level command.
  * @param level - the armed level.
- * @param reason - why the turn is armed.
  * @returns the one-line summary recorded on the message source.
  */
-export function injectionSummary(
-    level: UltracodeLevel,
-    reason: ArmReason,
-): string {
-    return `ultracode ${level} armed this turn (${reason})`;
+export function injectionSummary(level: UltracodeLevel): string {
+    return `ultracode ${level} armed this turn`;
 }

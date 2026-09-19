@@ -28,13 +28,10 @@ import {
 } from "./protocol.ts";
 
 /** One command the fold is waiting to see settle. */
-export type PendingCommand =
-    | {
-          readonly commandId: string;
-          readonly kind: "set-level";
-          readonly level: UltracodeLevel;
-      }
-    | { readonly commandId: string; readonly kind: "clear-turn" };
+export interface PendingCommand {
+    readonly commandId: string;
+    readonly level: UltracodeLevel;
+}
 
 /** The state one projection unit folds for one session. */
 export interface ProjectionState {
@@ -52,14 +49,6 @@ export interface ProjectionState {
     readonly fromCommand: boolean;
     /** A command that has been recorded as started but not yet as settled. */
     readonly pending: PendingCommand | null;
-    /** Whether this session's log carries the arming banner of an open turn. */
-    readonly armed: boolean;
-    /** Whether that banner was armed by a trigger word. */
-    readonly keywordArmed: boolean;
-    /** Highest turn number seen in the log. */
-    readonly turn: number | null;
-    /** Monotone counter bumped only when a client-visible field changes. */
-    readonly revision: number;
     /**
      * The value that leaves the host. It is reused by reference while no visible
      * field changed, because the registry gates publication on `Object.is` of the
@@ -77,8 +66,6 @@ export interface SessionEventShape {
         readonly name?: unknown;
         readonly args?: unknown;
         readonly kind?: unknown;
-        readonly turn?: unknown;
-        readonly reason?: unknown;
         readonly source?: {
             readonly kind?: unknown;
             readonly plugin?: unknown;
@@ -88,19 +75,12 @@ export interface SessionEventShape {
     };
 }
 
-/** Why a turn is armed; the banner states it and the fold recovers it. */
-export type ArmReason = "level" | "keyword";
-
 /** The state every session starts from. */
 export function initialProjectionState(): ProjectionState {
     return {
         level: "off",
         fromCommand: false,
         pending: null,
-        armed: false,
-        keywordArmed: false,
-        turn: null,
-        revision: 0,
         wire: initialWire(),
     };
 }
@@ -111,82 +91,44 @@ export function initialProjectionState(): ProjectionState {
  * `rotate` is the argument-less form: it advances from whatever level the fold
  * currently reports, which is why the reducer needs the state rather than only
  * the argument text. `level` means the words named a level, and the caller
- * resolves which one with {@link parseCommandLevel}.
+ * resolves which one with {@link parseUltracodeLevel}.
  */
 export type CommandClassification =
-    "status" | "clear" | "rotate" | "level" | "unknown-level";
+    "status" | "rotate" | "level" | "unknown-level";
 
 /**
- * Classify the raw argument text of one `/ultracode` invocation.
+ * Read the first word of one command's argument text.
  * @param args - the raw text after the command name.
- * @param extraLevels - deployment aliases that name the strongest level.
- * @returns what the invocation asks for.
+ * @returns the lowercased first word, or the empty string when there is none.
  */
-export function classifyCommandArgs(
-    args: string,
-    extraLevels: readonly string[] = [],
-): CommandClassification {
+function firstWordOf(args: string): string {
     const words = args
         .trim()
         .split(/\s+/u)
         .filter((word) => word !== "");
-    const head = (words[0] ?? "").toLowerCase();
-    if (head === "") return "rotate";
-    if (head === "status") return "status";
-    if (head === "clear" || head === "disarm" || head === "cancel")
-        return "clear";
-    if (parseCommandLevel(head, extraLevels) !== undefined) return "level";
-    return "unknown-level";
+    return (words[0] ?? "").toLowerCase();
 }
 
 /**
- * Resolve one command word to a level, honouring configured aliases.
- * @param word - the lowercased command word.
- * @param extraLevels - configured aliases, mapped onto the strongest level.
- * @returns the parsed level, or undefined when the word names no level.
+ * Classify the raw argument text of one `/ultracode` invocation.
+ * @param args - the raw text after the command name.
+ * @returns what the invocation asks for.
  */
-export function parseCommandLevel(
-    word: string,
-    extraLevels: readonly string[] = [],
-): UltracodeLevel | undefined {
-    const direct = parseUltracodeLevel(word);
-    if (direct !== undefined) return direct;
-    if (extraLevels.some((alias) => alias.toLowerCase() === word))
-        return "ultra";
-    return undefined;
+export function classifyCommandArgs(args: string): CommandClassification {
+    const head = firstWordOf(args);
+    if (head === "") return "rotate";
+    if (head === "status") return "status";
+    if (parseUltracodeLevel(head) !== undefined) return "level";
+    return "unknown-level";
 }
 
 /**
  * Read the level an invocation asks for, when it asks for one.
  * @param args - the raw text after the command name, already known to name a level.
- * @param extraLevels - deployment aliases that name the strongest level.
  * @returns the requested level, or undefined when the words name none.
  */
-function requestedLevel(
-    args: string,
-    extraLevels: readonly string[],
-): UltracodeLevel | undefined {
-    const words = args
-        .trim()
-        .split(/\s+/u)
-        .filter((word) => word !== "");
-    return parseCommandLevel((words[0] ?? "").toLowerCase(), extraLevels);
-}
-
-/**
- * Read the reason out of one banner summary.
- *
- * The summary is written by `prompt.ts` as `ultracode <level> armed this turn
- * (<reason>)`, so the trailing parenthesis is the contract between the two
- * modules. An unreadable summary is treated as the standing-level path, which
- * is the reason that carries no user action of its own.
- * @param summary - the banner's summary text.
- * @returns whether a trigger word armed the turn.
- */
-function reasonOfSummary(summary: unknown): ArmReason {
-    return typeof summary === "string" && summary.includes("(keyword)")
-        ? "keyword"
-        : "level";
+function requestedLevel(args: string): UltracodeLevel | undefined {
+    return parseUltracodeLevel(firstWordOf(args));
 }
 
 /**
@@ -232,32 +174,14 @@ function isBannerSource(source: unknown): boolean {
  * place, so the two can never disagree.
  * @param state - the state before the event.
  * @param level - the level the fold now reports.
- * @param armed - whether the current turn carries the banner.
- * @param keywordArmed - whether that banner came from a trigger word.
  * @returns the state to carry forward.
  */
 function withVisible(
     state: ProjectionState,
     level: UltracodeLevel,
-    armed: boolean,
-    keywordArmed: boolean,
 ): ProjectionState {
-    if (
-        state.wire.level === level &&
-        state.wire.armedTurn === armed &&
-        state.wire.keywordArmed === keywordArmed
-    ) {
-        return state;
-    }
-    const revision = state.revision + 1;
-    return {
-        ...state,
-        level,
-        armed,
-        keywordArmed,
-        revision,
-        wire: { level, armedTurn: armed, keywordArmed, revision },
-    };
+    if (state.wire.level === level) return state;
+    return { ...state, level, wire: { level } };
 }
 
 /**
@@ -269,13 +193,11 @@ function withVisible(
  * event would cost a view computation on every event of every session.
  * @param state - the state before the event.
  * @param event - the committed event to fold.
- * @param extraLevels - deployment aliases that name the strongest level.
  * @returns the state after the event.
  */
 export function applyProjectionEvent(
     state: ProjectionState,
     event: SessionEventShape,
-    extraLevels: readonly string[] = [],
 ): ProjectionState {
     const data = event.data;
 
@@ -288,16 +210,13 @@ export function applyProjectionEvent(
             typeof data.commandId === "string" ? data.commandId : null;
         const args = typeof data.args === "string" ? data.args : "";
         if (commandId === null) return state;
-        const classification = classifyCommandArgs(args, extraLevels);
-        if (classification === "clear") {
-            return { ...state, pending: { commandId, kind: "clear-turn" } };
-        }
+        const classification = classifyCommandArgs(args);
         const level =
             classification === "rotate"
                 ? nextUltracodeLevel(state.level)
-                : requestedLevel(args, extraLevels);
+                : requestedLevel(args);
         if (level === undefined) return state;
-        return { ...state, pending: { commandId, kind: "set-level", level } };
+        return { ...state, pending: { commandId, level } };
     }
 
     if (event.type === "command/done" && data !== undefined) {
@@ -312,29 +231,7 @@ export function applyProjectionEvent(
             return state;
         const settled: ProjectionState = { ...state, pending: null };
         if (data.kind !== "success") return settled;
-        if (pending.kind === "clear-turn") {
-            return withVisible(settled, settled.level, false, false);
-        }
-        return withVisible(
-            { ...settled, fromCommand: true },
-            pending.level,
-            settled.armed,
-            settled.keywordArmed,
-        );
-    }
-
-    if (event.type === "turn/start") {
-        const turn = typeof data?.turn === "number" ? data.turn : null;
-        if (turn === state.turn) return state;
-        return { ...state, turn };
-    }
-
-    if (event.type === "turn/end") {
-        // A turn that ended can no longer be armed: the banner it carried has done
-        // its work, and leaving the badge on would tell the user that the next turn
-        // is already authorised when it is not.
-        if (!state.armed && state.turn === null) return state;
-        return withVisible({ ...state, turn: null }, state.level, false, false);
+        return withVisible({ ...settled, fromCommand: true }, pending.level);
     }
 
     if (event.type === "user/message" && isBannerSource(data?.source)) {
@@ -345,12 +242,7 @@ export function applyProjectionEvent(
         const level = state.fromCommand
             ? state.level
             : (levelOfSummary(summary) ?? state.level);
-        return withVisible(
-            state,
-            level,
-            true,
-            reasonOfSummary(summary) === "keyword",
-        );
+        return withVisible(state, level);
     }
 
     return state;

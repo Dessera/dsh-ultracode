@@ -53,7 +53,8 @@ const client = {
     },
     outputOptions: {
         // The artifact name is fixed because package.json's `exports["./client"]`
-        // and the module loader's id both point at it.
+        // is what names the file the loader reads; the loader's id is the package
+        // name the module registers under, not a file name.
         entryFileNames: "client.js",
         banner: 'window.__ModuleLoader__.load({ id: "@dessera/dsh-ultracode", factory: (require) => {',
         footer: "return module.exports; } });",

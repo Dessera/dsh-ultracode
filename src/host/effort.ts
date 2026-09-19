@@ -2,16 +2,22 @@
  * Reasoning-effort pinning.
  *
  * While a session's level is not `off`, its requests ask for the strongest
- * reasoning effort the current model reports. The pin is applied on the
- * `agent/request` waterfall — after every other listener has resolved the call
- * configuration — and it changes one field only: the reasoning effort. Provider
- * and model stay exactly as resolved, so switching the model in the composer
- * keeps working and no model-switch notice is produced.
+ * reasoning effort of the route the pin was computed from. The pin is applied on
+ * the `agent/request` waterfall — after every other listener has resolved the
+ * call configuration — and it changes one field only: the reasoning effort.
+ * Provider and model stay exactly as resolved, so switching the model in the
+ * composer keeps working and no model-switch notice is produced.
  *
- * The configuration a session was running before its first pin is remembered
- * in host memory and written back when the level returns to `off`. A host
- * restart forgets it; the session then falls back to the model's own default,
- * which is recorded as a known limitation.
+ * The decision is computed once per arming and reused for every later request. A
+ * model switch made while the level stays armed therefore keeps its own provider
+ * and model but not its own effort: the request still asks for the effort of the
+ * route the plan was computed from, and the harness refuses a request whose
+ * effort id the model in use does not declare.
+ *
+ * The configuration a session was running before its first pin is remembered in
+ * host memory and written back when the level returns to `off`. A host restart
+ * forgets it, so the release then clears the field: the request falls back to
+ * the model's own default instead of staying pinned at the strongest effort.
  *
  * @module @dessera/dsh-ultracode/effort
  */
@@ -41,7 +47,10 @@ export type ResolveModelInfo = (
 
 /** A resolved answer for one provider/model route. */
 export interface RouteEffort {
-    /** Strongest effort the route reports, or undefined when it reports none. */
+    /**
+     * The effort the pin selects for the route — the last non-off entry the route
+     * declares — or undefined when it declares none.
+     */
     readonly strongest?: string;
 }
 
@@ -54,8 +63,6 @@ export interface EffortPlan {
      * instructions, even though both are applied the same way.
      */
     readonly effort?: string | undefined;
-    /** How `adapterDefaults.reasoningEffort` must be set for that value. */
-    readonly adapterDefault?: boolean;
 }
 
 /** The part of a call configuration that effort planning reads and writes. */
@@ -111,39 +118,41 @@ export class EffortResolver {
         const route = await this.routeFor(config.provider, config.model);
         const effort = this.explicit ?? route.strongest;
         if (effort === undefined) return {};
-        return { effort, adapterDefault: false };
+        return { effort };
     }
 
     /**
      * The effort to request once a session's level returns to `off`.
      *
-     * The plan carries the adapter-default flag only when the remembered value
-     * really was adapter-owned. Writing an explicit `false` would add a field to
-     * the persisted request header that a session running without this plugin
-     * would not have, so the key is omitted for a caller-proposed value.
+     * A remembered value is written back as an explicit request. Nothing
+     * remembered means the session found no effort it could read before the pin —
+     * the state after a host restart, where the baseline lived only in the
+     * previous process, or the state of a session with no usable request header
+     * whose deployment provides no default model either — and the field is then
+     * cleared, so the request falls back to the model's own default rather than
+     * keeping the pinned effort.
      * @param remembered - the effort the session was running before its first pin.
      * @returns the plan restoring the remembered configuration, or the plan that
      *   clears the field when nothing was remembered.
      */
     restorePlan(
-        remembered:
-            | { readonly effort: string; readonly adapterDefault: boolean }
-            | undefined,
+        remembered: { readonly effort: string } | undefined,
     ): EffortPlan {
         if (remembered === undefined || remembered.effort === "")
             return { effort: undefined };
-        return remembered.adapterDefault
-            ? { effort: remembered.effort, adapterDefault: true }
-            : { effort: remembered.effort };
+        return { effort: remembered.effort };
     }
 
     /**
      * Find the strongest effort one route declares.
      *
-     * The adapter publishes its efforts in its own preferred display order, so
-     * the last non-off entry is the strongest one it offers. That order is the
-     * only one the harness guarantees; a hard-coded strength ranking would
-     * silently pin a weaker level on a provider that names its levels differently.
+     * The adapter publishes its efforts in its own preferred display order, and
+     * the harness guarantees that order as a display order only — it does not
+     * promise that the order runs weakest to strongest. The pin therefore takes
+     * the last non-off entry and assumes that weakest-first ordering; a route that
+     * declares its efforts strongest first makes the pin select the weaker entry,
+     * which is still preferable to a hard-coded ranking that would break on a
+     * provider naming its levels differently.
      * @param provider - registered provider route.
      * @param model - provider-owned model id.
      * @returns the resolved route answer.
@@ -166,50 +175,25 @@ export class EffortResolver {
 /**
  * Apply one effort plan to a resolved call configuration.
  *
- * `adapterDefaults.reasoningEffort` is the harness's own flag for "this value
- * came from the adapter rather than from a caller". Restoring a remembered
- * adapter-owned effort without setting it would leave the persisted header
- * reading as though the value had been requested explicitly, which is exactly
- * the state the session-controller avoids when it writes a selection.
+ * Only the `reasoningEffort` field is touched. The harness decides for itself
+ * whether a value was adapter-defaulted, recomputing that marking from whether
+ * the caller supplied the field, so a plan that wrote the marking would be
+ * writing something the loop ignores — and the value it would write there
+ * (`false`) is one the persisted header schema does not admit at all.
  * @param config - the resolved call configuration.
  * @param plan - the effort plan for this request.
  * @returns the configuration to use for this request.
  */
-export function withEffortPlan<
-    T extends { reasoningEffort?: unknown; adapterDefaults?: unknown },
->(config: T, plan: EffortPlan): T {
-    const nextDefaults =
-        config.adapterDefaults === undefined
-            ? undefined
-            : {
-                  ...(config.adapterDefaults as Record<string, unknown>),
-                  ...(plan.adapterDefault === undefined
-                      ? {}
-                      : { reasoningEffort: plan.adapterDefault }),
-              };
-    const sameDefaults =
-        nextDefaults === undefined ||
-        JSON.stringify(nextDefaults) ===
-            JSON.stringify(config.adapterDefaults as Record<string, unknown>);
-
+export function withEffortPlan<T extends { reasoningEffort?: unknown }>(
+    config: T,
+    plan: EffortPlan,
+): T {
     if (plan.effort === undefined) {
-        if (config.reasoningEffort === undefined && sameDefaults) return config;
+        if (config.reasoningEffort === undefined) return config;
         const cleared = { ...config };
         delete (cleared as { reasoningEffort?: unknown }).reasoningEffort;
-        if (nextDefaults === undefined) {
-            delete (cleared as { adapterDefaults?: unknown }).adapterDefaults;
-        } else {
-            (cleared as { adapterDefaults?: unknown }).adapterDefaults =
-                nextDefaults;
-        }
         return cleared;
     }
-    if (config.reasoningEffort === plan.effort && sameDefaults) return config;
-    return {
-        ...config,
-        reasoningEffort: plan.effort,
-        ...(nextDefaults === undefined
-            ? {}
-            : { adapterDefaults: nextDefaults }),
-    } as T;
+    if (config.reasoningEffort === plan.effort) return config;
+    return { ...config, reasoningEffort: plan.effort } as T;
 }

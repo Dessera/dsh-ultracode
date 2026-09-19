@@ -26,10 +26,7 @@ export const COMMAND_NAME = "ultracode";
 export const ULTRACODE_KEY = "ultracode";
 
 /** Version of the projection's persisted state shape. */
-export const ULTRACODE_STATE_VERSION = 1;
-
-/** Default path prefix of the plugin's own HTTP route. */
-export const DEFAULT_ROUTE_PREFIX = "/dsh-ultracode";
+export const ULTRACODE_STATE_VERSION = 2;
 
 /** The three orchestration levels, lowest first. */
 export type UltracodeLevel = "off" | "high" | "ultra";
@@ -89,16 +86,6 @@ export function nextUltracodeLevel(level: UltracodeLevel): UltracodeLevel {
 }
 
 /**
- * Whether a level arms the turn it applies to. `off` never injects: a control
- * that reads "off" must mean the plugin stays out of the conversation.
- * @param level - the level in effect.
- * @returns whether the level arms turns and pins reasoning effort.
- */
-export function isArmed(level: UltracodeLevel): boolean {
-    return level !== "off";
-}
-
-/**
  * Describe one level for a user-facing string.
  * @param level - the level to name.
  * @param language - dictionary selector.
@@ -120,12 +107,6 @@ export function levelLabel(
 export interface UltracodeWire {
     /** The level the host's log fold currently reports. */
     readonly level: UltracodeLevel;
-    /** Whether the log already carries this turn's arming banner. */
-    readonly armedTurn: boolean;
-    /** Whether that banner was armed by a trigger word rather than by the level. */
-    readonly keywordArmed: boolean;
-    /** Monotone fold counter, bumped only when a visible field above changes. */
-    readonly revision: number;
 }
 
 /**
@@ -139,7 +120,7 @@ export interface ParseSchema<T> {
 
 /** The wire object every session starts from. */
 export function initialWire(): UltracodeWire {
-    return { level: "off", armedTurn: false, keywordArmed: false, revision: 0 };
+    return { level: "off" };
 }
 
 /**
@@ -166,16 +147,7 @@ function fieldOf(value: unknown, key: string): unknown {
 export const UltracodeWireSchema: ParseSchema<UltracodeWire> = {
     parse(value: unknown): UltracodeWire {
         const level = fieldOf(value, "level");
-        const revision = fieldOf(value, "revision");
-        return {
-            level: isUltracodeLevel(level) ? level : "off",
-            armedTurn: fieldOf(value, "armedTurn") === true,
-            keywordArmed: fieldOf(value, "keywordArmed") === true,
-            revision:
-                typeof revision === "number" && Number.isFinite(revision)
-                    ? revision
-                    : 0,
-        };
+        return { level: isUltracodeLevel(level) ? level : "off" };
     },
 };
 
@@ -191,26 +163,11 @@ export const UltracodeWireSchema: ParseSchema<UltracodeWire> = {
 export const ProjectionStateSchema: ParseSchema<ProjectionState> = {
     parse(value: unknown): ProjectionState {
         const level = fieldOf(value, "level");
-        const turn = fieldOf(value, "turn");
-        const revision = fieldOf(value, "revision");
-        const safeRevision =
-            typeof revision === "number" && Number.isFinite(revision)
-                ? revision
-                : 0;
-        const wire = UltracodeWireSchema.parse(fieldOf(value, "wire"));
         return {
             level: isUltracodeLevel(level) ? level : "off",
             fromCommand: fieldOf(value, "fromCommand") === true,
             pending: parsePending(fieldOf(value, "pending")),
-            armed: fieldOf(value, "armed") === true,
-            keywordArmed: fieldOf(value, "keywordArmed") === true,
-            turn:
-                typeof turn === "number" && Number.isFinite(turn) ? turn : null,
-            revision: safeRevision,
-            wire: {
-                ...wire,
-                revision: wire.revision === 0 ? safeRevision : wire.revision,
-            },
+            wire: UltracodeWireSchema.parse(fieldOf(value, "wire")),
         };
     },
 };
@@ -226,9 +183,8 @@ function parsePending(value: unknown): PendingCommand | null {
     const commandId =
         typeof record.commandId === "string" ? record.commandId : null;
     if (commandId === null) return null;
-    if (record.kind === "clear-turn") return { commandId, kind: "clear-turn" };
-    if (record.kind === "set-level" && isUltracodeLevel(record.level)) {
-        return { commandId, kind: "set-level", level: record.level };
+    if (isUltracodeLevel(record.level)) {
+        return { commandId, level: record.level };
     }
     return null;
 }

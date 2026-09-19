@@ -2,10 +2,10 @@
  * Integration test for the host half.
  *
  * It drives the built plugin through a stubbed host context: the pre-step
- * waterfall, the request waterfall, a command invocation, and one route
- * request. That covers the wiring of all three channels — which nothing else
- * can check without booting a real host — while leaving the full acceptance
- * walkthrough to the real GUI.
+ * waterfall, the request waterfall, and a command invocation. That covers the
+ * wiring of every channel the plugin owns — which nothing else can check without
+ * booting a real host — while leaving the full acceptance walkthrough to the
+ * real GUI.
  *
  * Every test here that needs a harness installation skips itself when none is
  * reachable, so the file never fails a checkout that has only this plugin.
@@ -49,7 +49,6 @@ function syntheticMessage(text) {
 /** A host context stub that records registrations and exposes one live agent. */
 function makeContext(options = {}) {
     const listeners = new Map();
-    const routes = [];
     const commands = [];
     /**
      * The projection units the plugin registered, keyed as the real registry keys
@@ -91,7 +90,6 @@ function makeContext(options = {}) {
     };
     return {
         listeners,
-        routes,
         commands,
         agent,
         feedFolded,
@@ -134,10 +132,6 @@ function makeContext(options = {}) {
                             }),
                         };
                     }
-                    if (key === "agents")
-                        return {
-                            get: (id) => (id === "sess-1" ? agent : undefined),
-                        };
                     if (key === "agentDefaultModel") {
                         const selection = options.defaultSelection;
                         if (selection === undefined) return undefined;
@@ -172,14 +166,6 @@ function makeContext(options = {}) {
                             },
                         };
                     }
-                    if (key === "webServer") {
-                        return {
-                            register(route) {
-                                routes.push(route);
-                                return () => {};
-                            },
-                        };
-                    }
                     return undefined;
                 },
             },
@@ -192,47 +178,20 @@ function makeContext(options = {}) {
     };
 }
 
-/** Build a response stub that records what the route wrote. */
-function makeResponse() {
-    const state = { status: 0, body: "" };
-    return {
-        state,
-        writeHead(status) {
-            state.status = status;
-        },
-        end(body) {
-            state.body = body ?? "";
-        },
-    };
-}
-
-/** Build a request stub carrying a JSON body. */
-function makeRequest(method, url, body) {
-    const listeners = new Map();
-    const raw = body === undefined ? "" : JSON.stringify(body);
-    return {
-        method,
-        url,
-        on(event, listener) {
-            listeners.set(event, listener);
-            if (event === "data" && raw !== "") listener(raw);
-            if (event === "end") listener();
-        },
-    };
-}
-
-/** Build a request stub whose body is exactly the text given, well-formed or not. */
-function makeRawRequest(method, url, raw) {
-    const listeners = new Map();
-    return {
-        method,
-        url,
-        on(event, listener) {
-            listeners.set(event, listener);
-            if (event === "data" && raw !== "") listener(raw);
-            if (event === "end") listener();
-        },
-    };
+/**
+ * Set one session's level through the command channel, which is the only writer.
+ *
+ * The composer control writes the same way, so this helper is what a press of the
+ * control amounts to on the host side.
+ * @param harness - the context stub the plugin was applied to.
+ * @param level - the level word to pass to the command.
+ */
+function setLevel(harness, level) {
+    const result = harness.commands[0].handler({
+        agent: harness.agent,
+        rawInput: ` ${level}`,
+    });
+    assert.equal(result.kind, "success", `setting ${level} must succeed`);
 }
 
 test("a bundle that regains a bare import is refused with the specifier named", async () => {
@@ -247,7 +206,7 @@ test("a bundle that regains a bare import is refused with the specifier named", 
         await assert.rejects(
             loadHostBundle(staged),
             /imports "@deepseek-ai\/dsh-llm" by name/,
-            "a bare import resolves only inside an installed profile, so the loader must name it",
+            "a bare import would load a copy of the harness the profile does not run, so the loader must name it",
         );
     } finally {
         rmSync(staging, { recursive: true, force: true });
@@ -255,20 +214,14 @@ test("a bundle that regains a bare import is refused with the specifier named", 
 });
 
 test(
-    "the host half mounts its listeners, command, and route",
+    "the host half mounts its listeners and its command",
     { skip: !available },
     async () => {
         const module = await loadHostBundle(bundlePath);
         const harness = makeContext();
         const dispose = module.apply(harness.ctx, {});
         assert.equal(module.name, "dsh-ultracode");
-        assert.deepEqual(module.inject, [
-            "tools",
-            "commands",
-            "llm",
-            "agents",
-            "webServer",
-        ]);
+        assert.deepEqual(module.inject, ["tools", "commands", "llm"]);
         assert.ok(
             harness.listeners.has("agent/pre-step"),
             "the pre-step listener must be mounted",
@@ -279,8 +232,6 @@ test(
         );
         assert.equal(harness.commands.length, 1);
         assert.equal(harness.commands[0].name, "ultracode");
-        assert.equal(harness.routes.length, 1);
-        assert.equal(harness.routes[0].path, "/dsh-ultracode/state");
         assert.equal(typeof dispose, "function");
         dispose();
         assert.equal(
@@ -301,19 +252,8 @@ test(
         const preStep = harness.listeners.get("agent/pre-step");
         const request = harness.listeners.get("agent/request");
 
-        // Select the ultra level through the route, which is what the control does.
-        const route = harness.routes[0];
-        const response = makeResponse();
-        await route.handler(
-            makeRequest("POST", "/dsh-ultracode/state", {
-                sessionId: "sess-1",
-                action: "set-level",
-                level: "ultra",
-            }),
-            response,
-        );
-        assert.equal(response.state.status, 200);
-        assert.equal(JSON.parse(response.state.body).level, "ultra");
+        // Select the ultra level through the command, which is what the control does.
+        setLevel(harness, "ultra");
 
         const synthetic = syntheticMessage("AGENTS.md contents follow");
         const human = humanMessage("帮我重构一下这个模块的解析逻辑并补上单测");
@@ -345,7 +285,7 @@ test(
         );
         assert.equal(again.messages.length, 1);
 
-        // The request waterfall pins the strongest effort the route reports.
+        // The request waterfall pins the strongest effort the model reports.
         const resolved = await request({ agent: harness.agent }, async () => ({
             provider: "p",
             model: "m",
@@ -354,121 +294,6 @@ test(
         }));
         assert.equal(resolved.reasoningEffort, "max");
         assert.equal(resolved.maxTokens, 10);
-    },
-);
-
-test(
-    "a cleared turn is not injected again while the following turn still is",
-    { skip: !available },
-    async () => {
-        const module = await loadHostBundle(bundlePath);
-        const harness = makeContext();
-        module.apply(harness.ctx, {});
-        const route = harness.routes[0];
-        const armed = makeResponse();
-        await route.handler(
-            makeRequest("POST", "/dsh-ultracode/state", {
-                sessionId: "sess-1",
-                action: "set-level",
-                level: "ultra",
-            }),
-            armed,
-        );
-        assert.equal(JSON.parse(armed.state.body).level, "ultra");
-
-        const preStep = harness.listeners.get("agent/pre-step");
-        const human = humanMessage("帮我重构一下这个模块的解析逻辑并补上单测");
-        const enter = async () => ({ kind: "enter", messages: [human] });
-        const first = await preStep(
-            { agent: harness.agent, messages: [human], turn: 1, step: 1 },
-            enter,
-        );
-        assert.equal(
-            first.messages.length,
-            2,
-            "the armed turn must be injected",
-        );
-
-        const cleared = harness.commands[0].handler({
-            agent: harness.agent,
-            rawInput: "clear",
-            signal: undefined,
-        });
-        assert.equal(cleared.kind, "success");
-
-        // The level is still ultra, so the clear covers this turn alone. A later step
-        // of the same turn has to leave the batch untouched: the banner the turn
-        // already carries is part of the conversation from here on, and injecting
-        // again would put a second copy of it in front of the model.
-        const laterStep = await preStep(
-            { agent: harness.agent, messages: [human], turn: 1, step: 2 },
-            enter,
-        );
-        assert.equal(
-            laterStep.messages.length,
-            1,
-            "a cleared turn must not be injected a second time",
-        );
-
-        // The next turn claims its own injection, so clearing one turn is not the
-        // same request as turning the level off.
-        const nextTurn = await preStep(
-            { agent: harness.agent, messages: [human], turn: 2, step: 1 },
-            enter,
-        );
-        assert.equal(
-            nextTurn.messages.length,
-            2,
-            "clearing a turn must leave the level in effect",
-        );
-    },
-);
-
-test(
-    "a trigger word inside a substantive message arms the turn through the keyword path",
-    { skip: !available },
-    async () => {
-        const module = await loadHostBundle(bundlePath);
-        const harness = makeContext();
-        module.apply(harness.ctx, { keywordTrigger: true });
-        const route = harness.routes[0];
-        const armed = makeResponse();
-        await route.handler(
-            makeRequest("POST", "/dsh-ultracode/state", {
-                sessionId: "sess-1",
-                action: "set-level",
-                level: "high",
-            }),
-            armed,
-        );
-        assert.equal(JSON.parse(armed.state.body).level, "high");
-
-        const preStep = harness.listeners.get("agent/pre-step");
-        const human = humanMessage("用 ultracode 跑一下这个模块的通知逻辑重构");
-        const decision = await preStep(
-            { agent: harness.agent, messages: [human], turn: 1, step: 1 },
-            async () => ({ kind: "enter", messages: [human] }),
-        );
-        assert.equal(
-            decision.messages.length,
-            2,
-            "the trigger word must arm this turn",
-        );
-        const banner = decision.messages[1];
-        const text = banner.content[0].text;
-        assert.ok(
-            text.includes("you typed the ultracode trigger word"),
-            `the banner must name the keyword path: ${text}`,
-        );
-        assert.equal(
-            text.includes("standing ultracode mode"),
-            false,
-            "the escape sentence belongs to the standing-level path, not to the trigger word",
-        );
-        assert.ok(
-            banner.source.summary.endsWith("(keyword)"),
-            `the summary must record the keyword path: ${banner.source.summary}`,
-        );
     },
 );
 
@@ -505,15 +330,7 @@ test(
             header: { origin: "subagent", delegationDepth: 1 },
         });
         module.apply(harness.ctx, {});
-        const route = harness.routes[0];
-        await route.handler(
-            makeRequest("POST", "/dsh-ultracode/state", {
-                sessionId: "sess-1",
-                action: "set-level",
-                level: "high",
-            }),
-            makeResponse(),
-        );
+        setLevel(harness, "high");
         const preStep = harness.listeners.get("agent/pre-step");
         const human = humanMessage("帮我重构一下这个模块的解析逻辑并补上单测");
         const decision = await preStep(
@@ -525,175 +342,26 @@ test(
 );
 
 test(
-    "the route refuses to arm a session that cannot see the workflow tool",
+    "the command refuses to arm a session that cannot see the workflow tool",
     { skip: !available },
     async () => {
         const module = await loadHostBundle(bundlePath);
         const harness = makeContext({ tools: { get: () => undefined } });
         module.apply(harness.ctx, {});
-        const response = makeResponse();
-        await harness.routes[0].handler(
-            makeRequest("POST", "/dsh-ultracode/state", {
-                sessionId: "sess-1",
-                action: "set-level",
-                level: "high",
-            }),
-            response,
-        );
-        assert.equal(response.state.status, 400);
-        assert.equal(JSON.parse(response.state.body).error, "unavailable");
-    },
-);
-
-test(
-    "the route answers a session that is not live with 404 on both methods",
-    { skip: !available },
-    async () => {
-        const module = await loadHostBundle(bundlePath);
-        const harness = makeContext();
-        module.apply(harness.ctx, {});
-        const route = harness.routes[0];
-
-        const read = makeResponse();
-        await route.handler(
-            makeRequest("GET", "/dsh-ultracode/state?sessionId=ghost"),
-            read,
-        );
-        assert.equal(read.state.status, 404);
-        assert.deepEqual(JSON.parse(read.state.body), {
-            error: "session-not-live",
-            sessionId: "ghost",
+        const result = harness.commands[0].handler({
+            agent: harness.agent,
+            rawInput: " high",
         });
-
-        const write = makeResponse();
-        await route.handler(
-            makeRequest("POST", "/dsh-ultracode/state", {
-                sessionId: "ghost",
-                action: "set-level",
-                level: "high",
-            }),
-            write,
-        );
-        assert.equal(write.state.status, 404);
-        assert.equal(JSON.parse(write.state.body).error, "session-not-live");
-
-        // A request that names no session at all gets the same answer, with a null id
-        // standing in for the one that is missing.
-        const bare = makeResponse();
-        await route.handler(makeRequest("GET", "/dsh-ultracode/state"), bare);
-        assert.equal(bare.state.status, 404);
-        assert.equal(JSON.parse(bare.state.body).sessionId, null);
-    },
-);
-
-test(
-    "the route refuses a method it does not serve",
-    { skip: !available },
-    async () => {
-        const module = await loadHostBundle(bundlePath);
-        const harness = makeContext();
-        module.apply(harness.ctx, {});
-        const response = makeResponse();
-        await harness.routes[0].handler(
-            makeRequest("PUT", "/dsh-ultracode/state", { sessionId: "sess-1" }),
-            response,
-        );
-        assert.equal(response.state.status, 405);
-        assert.deepEqual(JSON.parse(response.state.body), {
-            error: "method-not-allowed",
-        });
-    },
-);
-
-test(
-    "the route refuses a level outside the vocabulary",
-    { skip: !available },
-    async () => {
-        const module = await loadHostBundle(bundlePath);
-        const harness = makeContext();
-        module.apply(harness.ctx, {});
-        const response = makeResponse();
-        await harness.routes[0].handler(
-            makeRequest("POST", "/dsh-ultracode/state", {
-                sessionId: "sess-1",
-                action: "set-level",
-                level: "turbo",
-            }),
-            response,
-        );
-        assert.equal(response.state.status, 400);
-        const body = JSON.parse(response.state.body);
-        assert.equal(body.error, "invalid-level");
+        assert.equal(result.kind, "error");
         assert.ok(
-            body.message.includes("turbo"),
-            `the refusal must name the word it did not know: ${body.message}`,
+            result.text.toLowerCase().includes("workflow"),
+            `the refusal must name the tool it cannot see: ${result.text}`,
         );
     },
 );
 
 test(
-    "the route reports a body it cannot read as an internal failure",
-    { skip: !available },
-    async () => {
-        const module = await loadHostBundle(bundlePath);
-        const harness = makeContext();
-        module.apply(harness.ctx, {});
-        const route = harness.routes[0];
-
-        // A body that never parses fails inside the route, which answers as it does
-        // for any other internal error rather than letting the connection hang.
-        const truncated = makeResponse();
-        await route.handler(
-            makeRawRequest("POST", "/dsh-ultracode/state", '{"sessionId":'),
-            truncated,
-        );
-        assert.equal(truncated.state.status, 500);
-        assert.deepEqual(JSON.parse(truncated.state.body), {
-            error: "internal",
-        });
-
-        // So does JSON that parses to a value the control cannot read fields from.
-        const array = makeResponse();
-        await route.handler(
-            makeRequest("POST", "/dsh-ultracode/state", ["sess-1"]),
-            array,
-        );
-        assert.equal(array.state.status, 500);
-        assert.equal(JSON.parse(array.state.body).error, "internal");
-    },
-);
-
-test(
-    "an action outside the control vocabulary falls back to the status answer",
-    { skip: !available },
-    async () => {
-        const module = await loadHostBundle(bundlePath);
-        const harness = makeContext();
-        module.apply(harness.ctx, {});
-        const response = makeResponse();
-        await harness.routes[0].handler(
-            makeRequest("POST", "/dsh-ultracode/state", {
-                sessionId: "sess-1",
-                action: "rotate-somehow",
-            }),
-            response,
-        );
-        assert.equal(response.state.status, 200);
-        const body = JSON.parse(response.state.body);
-        assert.equal(
-            body.level,
-            "off",
-            "an unknown action must not change the level",
-        );
-        assert.ok(
-            body.notice.includes("档位：关闭"),
-            `the answer must be the status notice: ${body.notice}`,
-        );
-    },
-);
-
-test(
-    "the command drives the same level changes as the control route",
+    "the command drives the same level changes the control writes",
     { skip: !available },
     async () => {
         const module = await loadHostBundle(bundlePath);
@@ -717,11 +385,14 @@ test(
         });
         assert.equal(status.kind, "success");
         assert.ok(status.text.includes("高阶"));
+        // The clear subcommand is gone: the word names no level any more, so it is
+        // refused exactly like any other unknown word.
         const cleared = command.handler({
             agent: harness.agent,
             rawInput: " clear",
         });
-        assert.equal(cleared.kind, "success");
+        assert.equal(cleared.kind, "error");
+        assert.ok(cleared.text.includes("clear"));
         const off = command.handler({ agent: harness.agent, rawInput: " off" });
         assert.equal(off.kind, "success");
         assert.equal(
@@ -798,37 +469,18 @@ test(
         });
         harness.agent.session.requestHeader = () => undefined;
         module.apply(harness.ctx, {});
-        const route = harness.routes[0];
         const request = harness.listeners.get("agent/request");
 
-        const armed = makeResponse();
-        await route.handler(
-            makeRequest("POST", "/dsh-ultracode/state", {
-                sessionId: "sess-1",
-                action: "set-level",
-                level: "high",
-            }),
-            armed,
-        );
-        assert.equal(JSON.parse(armed.state.body).level, "high");
+        setLevel(harness, "high");
 
-        // While armed, the strongest effort the route reports is requested.
+        // While armed, the strongest effort the model reports is requested.
         const pinned = await request({ agent: harness.agent }, async () => ({
             provider: "p",
             model: "m",
         }));
         assert.equal(pinned.reasoningEffort, "max");
 
-        const released = makeResponse();
-        await route.handler(
-            makeRequest("POST", "/dsh-ultracode/state", {
-                sessionId: "sess-1",
-                action: "set-level",
-                level: "off",
-            }),
-            released,
-        );
-        assert.equal(JSON.parse(released.state.body).level, "off");
+        setLevel(harness, "off");
 
         // Releasing restores the deployment default rather than clearing the field.
         const restored = await request({ agent: harness.agent }, async () => ({
@@ -858,18 +510,9 @@ test(
             },
         });
         module.apply(harness.ctx, {});
-        const route = harness.routes[0];
         const request = harness.listeners.get("agent/request");
 
-        const armed = makeResponse();
-        await route.handler(
-            makeRequest("POST", "/dsh-ultracode/state", {
-                sessionId: "sess-1",
-                action: "set-level",
-                level: "ultra",
-            }),
-            armed,
-        );
+        setLevel(harness, "ultra");
         const pinned = await request({ agent: harness.agent }, async () => ({
             provider: "p",
             model: "m",
@@ -877,15 +520,7 @@ test(
         }));
         assert.equal(pinned.reasoningEffort, "max");
 
-        const released = makeResponse();
-        await route.handler(
-            makeRequest("POST", "/dsh-ultracode/state", {
-                sessionId: "sess-1",
-                action: "set-level",
-                level: "off",
-            }),
-            released,
-        );
+        setLevel(harness, "off");
         // The logged header wins over the deployment default: it is what this
         // session was actually running.
         const restored = await request({ agent: harness.agent }, async () => ({
@@ -894,6 +529,61 @@ test(
             reasoningEffort: "max",
         }));
         assert.equal(restored.reasoningEffort, "low");
+    },
+);
+
+test(
+    "a release in a process that never captured a baseline clears the pinned effort",
+    { skip: !available },
+    async () => {
+        const module = await loadHostBundle(bundlePath);
+        const harness = makeContext();
+        module.apply(harness.ctx, {});
+        // The level arrives from the log alone, which is the state of a session
+        // resumed after a host restart: the baseline the previous process captured
+        // lived in that process and is gone with it.
+        harness.feedFolded({
+            type: "command/run",
+            seq: 1,
+            data: { commandId: "c1", name: "ultracode", args: "high" },
+        });
+        harness.feedFolded({
+            type: "command/done",
+            seq: 2,
+            data: { commandId: "c1", kind: "success" },
+        });
+        const preStep = harness.listeners.get("agent/pre-step");
+        const request = harness.listeners.get("agent/request");
+
+        // The resumed session runs a turn first, which is what adopts the folded
+        // level into the mirror, and only then sends its request.
+        const human = humanMessage("帮我重构一下这个模块的解析逻辑并补上单测");
+        const decision = await preStep(
+            { agent: harness.agent, messages: [human], turn: 1, step: 1 },
+            async () => ({ kind: "enter", messages: [human] }),
+        );
+        assert.equal(decision.messages.length, 2);
+
+        const pinned = await request({ agent: harness.agent }, async () => ({
+            provider: "p",
+            model: "m",
+            reasoningEffort: "low",
+        }));
+        assert.equal(pinned.reasoningEffort, "max");
+
+        setLevel(harness, "off");
+        // The harness carries a caller-chosen effort forward from the last logged
+        // header, which is how the pin would outlive the level without a release.
+        const released = await request({ agent: harness.agent }, async () => ({
+            provider: "p",
+            model: "m",
+            reasoningEffort: "max",
+        }));
+        assert.equal(
+            "reasoningEffort" in released,
+            false,
+            "a release with no baseline must clear the field instead of keeping the pin",
+        );
     },
 );
 
@@ -930,12 +620,12 @@ test(
         );
 
         // Reading the state is how the plugin learns what the log already records, so
-        // it has to ask under the key it registered.
-        const view = makeResponse();
-        await harness.routes[0].handler(
-            makeRequest("GET", "/dsh-ultracode/state?sessionId=sess-1"),
-            view,
-        );
+        // it has to ask under the key it registered; the status answer is that read.
+        const status = harness.commands[0].handler({
+            agent: harness.agent,
+            rawInput: " status",
+        });
+        assert.equal(status.kind, "success");
         assert.deepEqual(
             [...new Set(harness.queriedKeys())],
             [ULTRACODE_KEY],
@@ -959,11 +649,6 @@ test(
             folded.wire.level,
             "ultra",
             "the folded level must be the one the command named",
-        );
-        assert.equal(
-            folded.wire.armedTurn,
-            false,
-            "no banner has entered the log yet",
         );
         assert.equal(
             definition.wire.view(folded),
@@ -1021,7 +706,6 @@ test(
         // the host is started against it afterwards.
         const harness = makeContext();
         module.apply(harness.ctx, {});
-        harness.feedFolded({ type: "turn/start", seq: 1, data: { turn: 3 } });
         harness.feedFolded({
             type: "command/run",
             seq: 2,
@@ -1040,23 +724,13 @@ test(
                     kind: "plugin",
                     plugin: "dsh-ultracode",
                     form: "notice",
-                    summary: "ultracode ultra armed this turn (level)",
+                    summary: "ultracode ultra armed this turn",
                 },
             },
         });
 
-        const route = harness.routes[0];
-        const view = makeResponse();
-        await route.handler(
-            makeRequest("GET", "/dsh-ultracode/state?sessionId=sess-1"),
-            view,
-        );
-        const body = JSON.parse(view.state.body);
         // The mirror starts at off in a fresh process; adoption is what makes the
         // reported level and the injection follow the log instead.
-        assert.equal(body.level, "ultra");
-        assert.equal(body.armedTurn, true);
-
         const preStep = harness.listeners.get("agent/pre-step");
         const human = humanMessage("帮我重构一下这个模块的解析逻辑并补上单测");
         const decision = await preStep(
@@ -1084,22 +758,22 @@ test(
 );
 
 test(
-    "with nothing in the log the reported level is off and the turn is not armed",
+    "with nothing in the log the level reads off and no turn is injected",
     { skip: !available },
     async () => {
         const module = await loadHostBundle(bundlePath);
         const harness = makeContext();
         module.apply(harness.ctx, {});
-        harness.feedFolded({ type: "turn/start", seq: 1, data: { turn: 1 } });
-        const route = harness.routes[0];
-        const view = makeResponse();
-        await route.handler(
-            makeRequest("GET", "/dsh-ultracode/state?sessionId=sess-1"),
-            view,
+        // The status answer reports the fold, which with an empty log is off.
+        const status = harness.commands[0].handler({
+            agent: harness.agent,
+            rawInput: " status",
+        });
+        assert.equal(status.kind, "success");
+        assert.ok(
+            status.text.includes("关闭"),
+            `an empty log must read as off: ${status.text}`,
         );
-        const body = JSON.parse(view.state.body);
-        assert.equal(body.level, "off");
-        assert.equal(body.armedTurn, false);
         const preStep = harness.listeners.get("agent/pre-step");
         const human = humanMessage("帮我重构一下这个模块的解析逻辑并补上单测");
         const decision = await preStep(

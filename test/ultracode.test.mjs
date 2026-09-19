@@ -8,15 +8,9 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
+import { isUltracodeLevel, parseUltracodeLevel } from "../src/host/protocol.ts";
 import {
-    isArmed,
-    isUltracodeLevel,
-    parseUltracodeLevel,
-} from "../src/host/protocol.ts";
-import {
-    buildKeywordPattern,
     isSubstantiveRequest,
-    matchesKeyword,
     weightedLength,
     SUBSTANTIVE_WEIGHT_THRESHOLD,
 } from "../src/host/heuristics.ts";
@@ -41,7 +35,7 @@ import { UltracodeStateStore } from "../src/host/state.ts";
 const sessionOf = (id) => ({ id });
 
 /** Fold the banner message the plugin injects for one armed turn. */
-function foldBanner(level, reason) {
+function foldBanner(level) {
     return applyProjectionEvent(initialProjectionState(), {
         type: "user/message",
         seq: 1,
@@ -50,7 +44,7 @@ function foldBanner(level, reason) {
                 kind: "plugin",
                 plugin: "dsh-ultracode",
                 form: "notice",
-                summary: injectionSummary(level, reason),
+                summary: injectionSummary(level),
             },
         },
     });
@@ -67,8 +61,6 @@ test("the level vocabulary accepts exactly the three levels", () => {
     );
     assert.equal(isUltracodeLevel("max"), false);
     assert.equal(isUltracodeLevel(undefined), false);
-    assert.equal(isArmed("off"), false);
-    assert.equal(isArmed("high"), true);
 });
 
 test("a level word is trimmed and lowercased before it is parsed", () => {
@@ -92,49 +84,21 @@ test("a level change reports whether it changed anything", () => {
     assert.equal(store.select(session, "off").kind, "changed");
 });
 
-test("one turn is injected at most once, and the reason is remembered", () => {
+test("one turn is injected at most once", () => {
     const store = new UltracodeStateStore();
     const session = sessionOf("s1");
-    assert.equal(store.claimInjection(session, 3, "level"), true);
-    assert.equal(store.stateOf(session).keywordArmedTurn, false);
-    assert.equal(store.claimInjection(session, 3, "level"), false);
-    assert.equal(store.claimInjection(session, 4, "keyword"), true);
-    assert.equal(store.stateOf(session).keywordArmedTurn, true);
-});
-
-test("a cleared marker stops reporting the turn as armed and keeps its claim", () => {
-    const store = new UltracodeStateStore();
-    const session = sessionOf("s1");
-    assert.equal(store.claimInjection(session, 1, "keyword"), true);
-    assert.equal(store.armedTurn(session), true);
-    store.clearTurn(session);
-    // Clearing drops the marker without releasing the claim, because the banner the
-    // turn already carries cannot be taken back out of the conversation: injecting
-    // again in a later step of the same turn would only duplicate it.
-    assert.equal(store.stateOf(session).injectedTurn, 1);
-    assert.equal(store.armedTurn(session), false);
-    assert.equal(store.stateOf(session).keywordArmedTurn, false);
-    assert.equal(store.claimInjection(session, 1, "level"), false);
-    // With no fold to read, the view follows the marker rather than the claim.
-    assert.equal(
-        store.viewOf(session, true, undefined, "/dsh-ultracode/state")
-            .armedTurn,
-        false,
-    );
-    // The next turn claims its own injection, which is what puts the marker back.
-    assert.equal(store.claimInjection(session, 2, "level"), true);
-    assert.equal(store.armedTurn(session), true);
+    assert.equal(store.claimInjection(session, 3), true);
+    assert.equal(store.claimInjection(session, 3), false);
+    // A later turn claims its own injection.
+    assert.equal(store.claimInjection(session, 4), true);
 });
 
 test("the first remembered effort wins and can be forgotten", () => {
     const store = new UltracodeStateStore();
     const session = sessionOf("s1");
-    store.rememberEffort(session, { effort: "high", adapterDefault: false });
-    store.rememberEffort(session, { effort: "low", adapterDefault: true });
-    assert.deepEqual(store.rememberedEffort(session), {
-        effort: "high",
-        adapterDefault: false,
-    });
+    store.rememberEffort(session, { effort: "high" });
+    store.rememberEffort(session, { effort: "low" });
+    assert.deepEqual(store.rememberedEffort(session), { effort: "high" });
     store.forgetEffort(session);
     assert.equal(store.rememberedEffort(session), undefined);
 });
@@ -209,41 +173,8 @@ test("weighted length counts four Latin letters as one glyph", () => {
     );
 });
 
-test("a trigger word matches when it touches Chinese characters", () => {
-    const pattern = buildKeywordPattern(["ultracode"]);
-    assert.equal(matchesKeyword("用ultracode跑一下", pattern), true);
-    assert.equal(matchesKeyword("ultracode", pattern), true);
-    assert.equal(matchesKeyword("开启 ULTRAcode 模式", pattern), true);
-});
-
-test("a trigger word inside a path or an identifier does not match", () => {
-    const pattern = buildKeywordPattern(["ultracode"]);
-    assert.equal(matchesKeyword("src/ultracode.ts", pattern), false);
-    assert.equal(matchesKeyword("--ultracode", pattern), false);
-    assert.equal(matchesKeyword("myultracode", pattern), false);
-    assert.equal(matchesKeyword("$ultracode", pattern), false);
-});
-
-test("an unrelated word is not a trigger", () => {
-    const pattern = buildKeywordPattern(["ultracode"]);
-    assert.equal(
-        matchesKeyword("我们讨论一下 workflow 的设计", pattern),
-        false,
-    );
-});
-
-test("the keyword matcher is reusable across calls", () => {
-    const pattern = buildKeywordPattern(["ultracode"]);
-    assert.equal(matchesKeyword("ultracode 一次", pattern), true);
-    assert.equal(matchesKeyword("ultracode 再一次", pattern), true);
-});
-
-test("no trigger word configured means no match", () => {
-    assert.equal(matchesKeyword("ultracode", buildKeywordPattern([])), false);
-});
-
 test("the banner names only the script surface the engine provides", () => {
-    const banner = buildBanner("level");
+    const banner = buildBanner();
     for (const hook of SCRIPT_SURFACE)
         assert.ok(banner.includes(hook), `banner should name ${hook}`);
     for (const forbidden of FORBIDDEN_SCRIPT_NAMES) {
@@ -257,74 +188,59 @@ test("the banner names only the script surface the engine provides", () => {
 
 test("no generated text names a hook the engine does not provide", () => {
     for (const level of ["high", "ultra"]) {
-        for (const reason of ["level", "keyword"]) {
-            const text = buildInjection(level, reason);
-            for (const forbidden of FORBIDDEN_SCRIPT_NAMES) {
-                assert.equal(
-                    text.includes(forbidden),
-                    false,
-                    `${level}/${reason} must not name ${forbidden}`,
-                );
-            }
+        const text = buildInjection(level);
+        for (const forbidden of FORBIDDEN_SCRIPT_NAMES) {
+            assert.equal(
+                text.includes(forbidden),
+                false,
+                `${level} must not name ${forbidden}`,
+            );
         }
     }
 });
 
-test("the standing level path carries the escape sentence and the keyword path does not", () => {
-    assert.ok(
-        buildInstruction("ultra", "level").includes("standing ultracode mode"),
-    );
-    assert.equal(
-        buildInstruction("ultra", "keyword").includes(
-            "standing ultracode mode",
-        ),
-        false,
-    );
-    assert.equal(buildInstruction("off", "level"), "");
+test("every armed level carries the escape sentence and off carries nothing", () => {
+    for (const level of ["high", "ultra"]) {
+        assert.ok(
+            buildInstruction(level).includes("standing ultracode mode"),
+            `${level} must let the model skip a trivial turn`,
+        );
+    }
+    assert.equal(buildInstruction("off"), "");
 });
 
-test("the reason clause distinguishes the two arming paths", () => {
-    assert.ok(buildBanner("keyword").includes("explicit opt-in"));
-    assert.ok(buildBanner("level").includes("standing ultracode mode"));
+test("the banner states why the turn is armed", () => {
+    assert.ok(buildBanner().includes("standing ultracode mode"));
 });
 
 test("the injected banner is wrapped in the stable open and close markers", () => {
-    for (const reason of ["level", "keyword"]) {
-        const banner = buildBanner(reason);
-        assert.equal(
-            banner.startsWith(`---\n${BANNER_OPEN}`),
-            true,
-            `the ${reason} banner must open with the marker`,
-        );
-        assert.equal(
-            banner.endsWith(BANNER_CLOSE),
-            true,
-            `the ${reason} banner must close with the marker`,
-        );
-    }
+    const banner = buildBanner();
+    assert.equal(
+        banner.startsWith(`---\n${BANNER_OPEN}`),
+        true,
+        "the banner must open with the marker",
+    );
+    assert.equal(
+        banner.endsWith(BANNER_CLOSE),
+        true,
+        "the banner must close with the marker",
+    );
     // The block opens before the decision sentence, so the marker wraps the whole
-    // banner rather than the reason clause alone.
+    // banner rather than the arming clause alone.
     assert.equal(BANNER_OPEN, "[workflows mode armed.");
     assert.equal(BANNER_CLOSE, "]");
 });
 
 test("the summary the injector writes is the one the fold reads back", () => {
-    const keyword = foldBanner("high", "keyword");
-    assert.equal(keyword.level, "high");
-    assert.equal(keyword.wire.armedTurn, true);
-    assert.equal(keyword.wire.keywordArmed, true);
-
-    const byLevel = foldBanner("ultra", "level");
-    assert.equal(byLevel.level, "ultra");
-    assert.equal(byLevel.wire.armedTurn, true);
-    assert.equal(byLevel.wire.keywordArmed, false);
+    assert.equal(foldBanner("high").level, "high");
+    assert.equal(foldBanner("ultra").level, "ultra");
 });
 
 test("the injected banner message is frozen all the way down", () => {
     const banner = createBannerMessage(
         "the injected text",
         "dsh-ultracode",
-        "ultracode ultra armed this turn (level)",
+        "ultracode ultra armed this turn",
     );
     assert.equal(Object.isFrozen(banner), true);
     assert.equal(Object.isFrozen(banner.content), true);
@@ -332,7 +248,7 @@ test("the injected banner message is frozen all the way down", () => {
     assert.equal(Object.isFrozen(banner.source), true);
 });
 
-test("adopting a folded level that differs from the mirror records the divergence", () => {
+test("adopting a folded level seeds the mirror once and never moves it again", () => {
     const store = new UltracodeStateStore();
     const session = sessionOf("s1");
     assert.equal(store.adopted(session), false);
@@ -345,59 +261,4 @@ test("adopting a folded level that differs from the mirror records the divergenc
         "off",
         "a second adopt must not move the mirror",
     );
-    store.reconcile(session, "ultra");
-    assert.deepEqual(store.divergenceOf(session), {
-        folded: "ultra",
-        mirrored: "off",
-    });
-});
-
-test("the divergence record is kept once per mirrored level", () => {
-    const store = new UltracodeStateStore();
-    const session = sessionOf("s1");
-    store.adopt(session, "ultra");
-    store.reconcile(session, "high");
-    assert.deepEqual(store.divergenceOf(session), {
-        folded: "high",
-        mirrored: "ultra",
-    });
-    store.reconcile(session, "off");
-    assert.deepEqual(
-        store.divergenceOf(session),
-        { folded: "high", mirrored: "ultra" },
-        "the record must not be rewritten while the mirror itself has not moved",
-    );
-    store.reconcile(session, "high");
-    assert.deepEqual(store.divergenceOf(session), {
-        folded: "high",
-        mirrored: "ultra",
-    });
-});
-
-test("reconciling a session that was never adopted records nothing", () => {
-    const store = new UltracodeStateStore();
-    const session = sessionOf("s1");
-    store.reconcile(session, "high");
-    assert.equal(store.divergenceOf(session), undefined);
-});
-
-test("the view reports the folded level over the mirror and passes the rest through", () => {
-    const store = new UltracodeStateStore();
-    const session = sessionOf("s1");
-    store.select(session, "ultra");
-    const view = store.viewOf(session, true, "max", "/dsh-ultracode/state", {
-        level: "off",
-        armedTurn: true,
-        keywordArmed: true,
-    });
-    assert.equal(
-        view.level,
-        "off",
-        "the fold is the authority once a caller supplies it",
-    );
-    assert.equal(view.armedTurn, true);
-    assert.equal(view.keywordArmedTurn, true);
-    assert.equal(view.available, true);
-    assert.equal(view.modelEffort, "max");
-    assert.equal(view.route, "/dsh-ultracode/state");
 });

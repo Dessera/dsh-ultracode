@@ -20,7 +20,6 @@ export const zh = {
     "chip.title.connecting":
         "尚未收到宿主发布的档位，点击等同于执行一次 /ultracode 命令",
     "chip.busy": "正在应用…",
-    "chip.armed": "触发词",
     "error.action": "切换 Ultracode 档位失败",
 } as const;
 
@@ -53,6 +52,5 @@ export const en = {
     "chip.title.connecting":
         "The host has not published a level yet; a click runs one /ultracode command",
     "chip.busy": "Applying…",
-    "chip.armed": "trigger word",
     "error.action": "Could not change the Ultracode level",
 } as const;

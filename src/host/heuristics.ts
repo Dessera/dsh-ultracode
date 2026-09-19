@@ -1,8 +1,8 @@
 /**
- * Substantive-message and trigger-word heuristics.
+ * The substantive-message heuristic.
  *
- * Both judgements are pure functions over the text a user submitted, so they
- * are unit-testable without a host. Their thresholds are stated in units that
+ * The judgement is a pure function over the text a user submitted, so it is
+ * unit-testable without a host. Its thresholds are stated in units that
  * survive Chinese: a Latin-character count is the wrong yardstick for
  * languages where a complete request fits in a dozen glyphs.
  *
@@ -14,9 +14,10 @@
  *
  * One CJK ideograph, kana, or Hangul syllable weighs 1; one Latin letter or
  * digit weighs 0.25, i.e. four letters weigh as much as one glyph. Sixteen
- * weighted units is the threshold, which is four CJK glyphs — short enough
- * that "帮我重构一下这个模块" (10 glyphs) arms, and long enough that "你好" and
- * "thanks" do not.
+ * weighted units is the threshold, which is sixteen CJK glyphs or sixty-four
+ * Latin letters. A message below the threshold still counts when it names a work
+ * verb, which is why "帮我重构一下这个模块" — ten weighted units, carrying 重构 —
+ * arms while "你好" and "thanks" do not.
  */
 export const SUBSTANTIVE_WEIGHT_THRESHOLD = 16;
 
@@ -95,55 +96,4 @@ export function isSubstantiveRequest(text: string): boolean {
     return (
         WORK_VERB_PATTERN.test(trimmed) && weight >= MINIMUM_WORK_VERB_WEIGHT
     );
-}
-
-/**
- * Escape one trigger word for use inside a regular expression.
- * @param word - the configured trigger word.
- * @returns the word with regular-expression metacharacters escaped.
- */
-function escapeRegExp(word: string): string {
-    return word.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
-}
-
-/**
- * Build the trigger-word matcher for the configured words.
- *
- * The boundaries deliberately exclude only the characters that would make a
- * match an accident of a path, flag, or variable name: a slash, a backslash, a
- * dollar sign, and a hyphen. CJK ideographs carry the Unicode `ID_Continue`
- * property, so a boundary built from that property would refuse the ordinary
- * Chinese spelling "用ultracode跑一下"; this matcher accepts a trigger word
- * directly against a CJK glyph and refuses it inside a path or an identifier.
- * @param keywords - configured trigger words; empty entries are dropped.
- * @returns a global, case-insensitive matcher, or undefined when no word is configured.
- */
-export function buildKeywordPattern(
-    keywords: readonly string[],
-): RegExp | undefined {
-    const words = keywords
-        .map((word) => word.trim())
-        .filter((word) => word !== "")
-        .map(escapeRegExp);
-    if (words.length === 0) return undefined;
-    const alternation = words.join("|");
-    return new RegExp(
-        `(?:^|[^\\w/\\\\$-])(?:${alternation})(?![\\w$-])`,
-        "giu",
-    );
-}
-
-/**
- * Test one message for a configured trigger word.
- * @param text - the message text.
- * @param pattern - the matcher built by {@link buildKeywordPattern}.
- * @returns whether a trigger word occurs in the text.
- */
-export function matchesKeyword(
-    text: string,
-    pattern: RegExp | undefined,
-): boolean {
-    if (pattern === undefined) return false;
-    pattern.lastIndex = 0;
-    return pattern.test(text);
 }

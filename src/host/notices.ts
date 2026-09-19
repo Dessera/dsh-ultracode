@@ -7,9 +7,8 @@
  * because a notice the host prints and a label the chip shows are different
  * surfaces even when they describe the same level.
  *
- * `usage` and `unknownLevel` name the level vocabulary through
- * {@link LEVEL_WORDS}, so the words a person may type are stated in exactly one
- * place.
+ * `usage` names the level vocabulary through {@link LEVEL_WORDS}; the
+ * unknown-level notice spells the available levels out in its own sentence.
  *
  * @module @dessera/dsh-ultracode/notices
  */
@@ -23,13 +22,7 @@ export interface NoticeTemplates {
     readonly levelOff: string;
     readonly levelHigh: string;
     readonly levelUltra: string;
-    readonly cleared: string;
-    readonly status: (
-        level: string,
-        keyword: boolean,
-        armed: boolean,
-        available: boolean,
-    ) => string;
+    readonly status: (level: string, available: boolean) => string;
 }
 
 /** Every notice the plugin prints, keyed by the configured language. */
@@ -46,9 +39,8 @@ export const NOTICES: Record<"zh" | "en", NoticeTemplates> = {
             "Ultracode 档位已切到高阶：实质性任务将自动编排，推理强度提到该模型的最强档。",
         levelUltra:
             "Ultracode 档位已切到极致：实质性任务将大面积展开，推理强度提到该模型的最强档。",
-        cleared: "已清除本会话的武装标记。",
-        status: (level, keyword, armed, available) =>
-            `Ultracode 档位：${level}；关键词触发：${keyword ? "开" : "关"}；本轮武装：${armed ? "是" : "否"}；workflow 工具：${available ? "可见" : "不可见"}。`,
+        status: (level, available) =>
+            `Ultracode 档位：${level}；workflow 工具：${available ? "可见" : "不可见"}。`,
     },
     en: {
         usage: `Usage: /ultracode ${LEVEL_WORDS}, or /ultracode status.`,
@@ -62,8 +54,7 @@ export const NOTICES: Record<"zh" | "en", NoticeTemplates> = {
             "Ultracode level is high: substantive tasks are armed for orchestration and reasoning is at its strongest.",
         levelUltra:
             "Ultracode level is ultra: substantive tasks fan out widely and reasoning is at its strongest.",
-        cleared: "The armed marker for this session is cleared.",
-        status: (level, keyword, armed, available) =>
-            `Ultracode level: ${level}; keyword trigger: ${keyword ? "on" : "off"}; this turn armed: ${armed ? "yes" : "no"}; workflow tool: ${available ? "visible" : "not visible"}.`,
+        status: (level, available) =>
+            `Ultracode level: ${level}; workflow tool: ${available ? "visible" : "not visible"}.`,
     },
 };

@@ -20,8 +20,8 @@
  * them. Without these edges the slot table is empty, `conversation.input.right`
  * is not a key, and `ctx.slots` does not exist.
  *
- * Only the client half imports this file. The host half's contract lives beside
- * this tree in `src/host/host-contract.ts`.
+ * Only the client half imports this file. The host half's contract lives in the
+ * sibling tree at `src/host/contract.ts`.
  *
  * @module @dessera/dsh-ultracode/client/contract
  */

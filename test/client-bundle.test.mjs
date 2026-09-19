@@ -14,7 +14,7 @@
  * the host has published a value, and a press goes through the command channel
  * rather than through a private copy of the level.
  *
- * It runs after `npm run build`; `npm run check` orders the two that way.
+ * It runs after `pnpm build`; `pnpm check` orders the two that way.
  */
 import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
@@ -380,9 +380,6 @@ test(
             props: {
                 useProjection: () => ({
                     level: "ultra",
-                    armedTurn: false,
-                    keywordArmed: false,
-                    revision: 2,
                 }),
             },
         });
@@ -451,9 +448,6 @@ test(
             props: {
                 useProjection: () => ({
                     level: "high",
-                    armedTurn: false,
-                    keywordArmed: false,
-                    revision: 1,
                 }),
             },
         });
@@ -483,9 +477,6 @@ test(
                     if (key !== ULTRACODE_KEY) return undefined;
                     return {
                         level: "ultra",
-                        armedTurn: false,
-                        keywordArmed: false,
-                        revision: 3,
                     };
                 },
             },
@@ -521,9 +512,6 @@ test(
             props: {
                 useProjection: () => ({
                     level: "off",
-                    armedTurn: false,
-                    keywordArmed: false,
-                    revision: 1,
                 }),
                 t: (key) => en[key] ?? key,
             },
@@ -589,9 +577,6 @@ test(
                     ? undefined
                     : {
                           level: state,
-                          armedTurn: false,
-                          keywordArmed: false,
-                          revision: 1,
                       };
             const chip = renderChip(injected, {
                 props: {
@@ -635,9 +620,6 @@ test(
         const { injected } = injectedProps();
         const published = () => ({
             level: "high",
-            armedTurn: false,
-            keywordArmed: false,
-            revision: 1,
         });
         // The copy can go missing in two ways, and both land on the fallback table:
         // a locale registry with no entry for a key answers undefined for it, while
@@ -674,41 +656,6 @@ test(
 );
 
 test(
-    "an armed turn shows the trigger-word badge and the pressed state",
-    { skip: !existsSync(bundlePath) },
-    () => {
-        const { injected } = injectedProps();
-        const armed = renderChip(injected, {
-            props: {
-                useProjection: () => ({
-                    level: "ultra",
-                    armedTurn: true,
-                    keywordArmed: true,
-                    revision: 4,
-                }),
-                t: (key) => zh[key] ?? key,
-            },
-        });
-        assert.equal(armed.text, `${zh["chip.ultra"]}${zh["chip.armed"]}`);
-        assert.equal(armed.button.props["aria-pressed"], true);
-        // The trigger word is a reason for the badge, not a second arming signal: a
-        // turn banner the level itself armed carries no badge.
-        const levelArmed = renderChip(injected, {
-            props: {
-                useProjection: () => ({
-                    level: "ultra",
-                    armedTurn: true,
-                    keywordArmed: false,
-                    revision: 4,
-                }),
-                t: (key) => zh[key] ?? key,
-            },
-        });
-        assert.equal(levelArmed.text, zh["chip.ultra"]);
-    },
-);
-
-test(
     "the seat registers as its own list entry and each press asks for the next level",
     { skip: !existsSync(bundlePath) },
     async () => {
@@ -732,15 +679,9 @@ test(
         const published = {
             off: {
                 level: "off",
-                armedTurn: false,
-                keywordArmed: false,
-                revision: 1,
             },
             ultra: {
                 level: "ultra",
-                armedTurn: false,
-                keywordArmed: false,
-                revision: 2,
             },
             connecting: undefined,
         };

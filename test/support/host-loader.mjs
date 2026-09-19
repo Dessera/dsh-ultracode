@@ -8,8 +8,10 @@
  * provides and staged the result in a temp file, and that machinery went away
  * with the last bare import. What remains of it is the guard in
  * {@link loadHostBundle}, which is the case the rewriting existed for: a bare
- * import that comes back would not resolve from here, and the guard names it
- * instead of leaving an unresolved-module error to guess at.
+ * import that comes back would load whichever copy of the harness package the
+ * reader resolves, which is not the copy the installed profile runs, and the guard
+ * names the specifier instead of letting the suite test a different copy of the
+ * code.
  *
  * `findPackage` and `harnessRoots` stay exported because the contract probe uses
  * them to read the harness that is installed on this machine.
@@ -52,9 +54,11 @@ export const root = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 /**
  * Find the first top-level import of a package that would not resolve from here.
  *
- * Only a line that begins with `import` is read. The bundle's inlined code is
- * indented, so a top-level import declaration is the one shape that can start at
- * column zero, while the same word inside inlined text cannot reach it.
+ * Only a line that begins with `import` is read. The host artifact is flat ESM,
+ * so its own statements and the code bundled into it both start at column zero and
+ * indentation tells them apart nowhere; what makes this test exact is that the
+ * only line of the built artifact beginning with that word is the artifact's own
+ * external import.
  * @param source - the bundle's text.
  * @returns the offending specifier, or undefined when every import is local.
  */
@@ -78,7 +82,7 @@ export async function loadHostBundle(bundlePath = join(root, "lib/index.js")) {
     const bare = bareImportOf(readFileSync(bundlePath, "utf8"));
     if (bare !== undefined) {
         throw new Error(
-            `the host bundle imports ${JSON.stringify(bare)} by name, which resolves only inside an installed profile; ` +
+            `the host bundle imports ${JSON.stringify(bare)} by name, so it would load whichever copy the reader resolves rather than the one the profile runs; ` +
                 "inline that module into the bundle, or restore the specifier rewriting this loader used to do",
         );
     }

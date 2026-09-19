@@ -47,10 +47,11 @@ function fieldOf(value: unknown, key: string): unknown {
 /**
  * Turn one remote reply into an outcome.
  *
- * The reply is narrowed with local guards rather than trusted structurally: the
- * command channel's own generated declaration promises a richer value than the
- * session controller's client half actually delivers, so the only fields read
- * here are the ones both shapes carry.
+ * The reply is narrowed with local guards rather than trusted structurally:
+ * `result.kind` and `result.text` belong to the `CommandExecution` the channel
+ * declares, and the `{ matched }` value the session controller's client half
+ * reduces that reply to carries no `result` field at all, so no field is read
+ * without a guard.
  * @param reply - the value the remote call resolved to.
  * @returns whether the change was accepted, with the host's message when not.
  */
@@ -77,7 +78,8 @@ export function readOutcome(reply: unknown): ChangeOutcome {
  * Ask the host to apply one level to one session.
  * @param commands - the command executor the client half injected.
  * @param sessionId - the session being changed.
- * @param level - the level to apply; `rotate` asks for the next level instead.
+ * @param level - the level to apply, sent as the command's argument word;
+ *   rotating to the next level is the caller's own computation.
  * @returns whether the host accepted the change, with its message when it did not.
  */
 export async function changeLevel(
@@ -93,12 +95,13 @@ export async function changeLevel(
     }
     const line = `/${COMMAND_NAME} ${level}`;
     try {
-        // The harness addresses sessions by a branded id, while the id this plugin
-        // holds arrived as a seat prop and is therefore a plain string. The brand is
-        // applied here, at the one boundary that crosses between them, rather than
-        // by importing the session package's runtime brander: that module is the
-        // host's session implementation, and bundling it would put the whole store
-        // into the browser artifact for a cast that erases anyway.
+        // The harness addresses sessions by a branded id, while this half's own
+        // `changeLevel` signature widens it to a plain string, so the brand is
+        // reapplied here, at the one boundary that crosses between them, rather
+        // than by importing the session package's runtime brander: that brander is
+        // an identity function reached through the types subpath, and a value
+        // import would add a runtime module to the browser artifact to do what this
+        // cast already does at no runtime cost.
         const target = sessionId as SessionId;
         return readOutcome(await commands.execute(target, line, []));
     } catch (reason) {

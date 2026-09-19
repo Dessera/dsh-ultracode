@@ -1,11 +1,13 @@
 /**
  * The composer control's view logic, kept free of React.
  *
- * Everything the chip decides — which text it shows, whether it is waiting, and
- * what a press would do next — is a pure function of three inputs: the value the
- * host published, whether a change is in flight, and the last failure. Keeping
- * it here means the honest-placeholder rules can be tested without a renderer,
- * and it means there is exactly one place where a level reaches the screen.
+ * Everything the chip decides — which text it shows, whether it is waiting,
+ * whether it refuses presses, and what a press would do next — is a pure function
+ * of three inputs: the value the host published, whether a change is in flight,
+ * and whether the write channel exists at all. The last failure is passed in as
+ * well, and the view does not use it. Keeping the decision here means the
+ * honest-placeholder rules can be tested without a renderer, and it means there is
+ * exactly one place where a level reaches the screen.
  *
  * The rule the whole refactor rests on: the chip renders the host's own value or
  * an explicit "nothing published yet", and it never renders a level it derived
@@ -37,8 +39,6 @@ export interface ChipView {
     readonly titleKey: UltracodeKey;
     /** Whether the level is not `off`, which the chip renders as an active state. */
     readonly armed: boolean;
-    /** Whether the trigger-word badge belongs next to the label. */
-    readonly keywordArmed: boolean;
     /** Whether a press is currently in flight. */
     readonly pending: boolean;
     /** Whether the chip should refuse presses. */
@@ -77,7 +77,6 @@ export function chipView(
         ariaKey: `chip.aria.${suffix}` as UltracodeKey,
         titleKey: `chip.title.${suffix}` as UltracodeKey,
         armed: level !== null && level !== "off",
-        keywordArmed: wire?.armedTurn === true && wire.keywordArmed === true,
         pending,
         // A press is refused only while one is already in flight, or when the
         // session cannot carry the command at all. It is never refused merely

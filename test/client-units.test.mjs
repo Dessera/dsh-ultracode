@@ -20,14 +20,8 @@ import { en, zh } from "../src/client/locales.ts";
 import { changeLevel, readOutcome } from "../src/client/service.ts";
 
 /** Build a wire value for a session that sits at one level. */
-function wire(level, extra = {}) {
-    return {
-        level,
-        armedTurn: false,
-        keywordArmed: false,
-        revision: 1,
-        ...extra,
-    };
+function wire(level) {
+    return { level };
 }
 
 test("chipView translates each published level into its own text keys", () => {
@@ -68,33 +62,6 @@ test("chipView arms every level except off", () => {
     assert.equal(chipView(wire("ultra"), false, null, true).armed, true);
     // A connecting chip is not armed: it has no level to be armed at.
     assert.equal(chipView(undefined, false, null, true).armed, false);
-});
-
-test("chipView shows the trigger-word badge only for an armed turn", () => {
-    const both = { armedTurn: true, keywordArmed: true };
-    assert.equal(
-        chipView(wire("high", both), false, null, true).keywordArmed,
-        true,
-    );
-    // A turn banner the level itself armed is not a trigger-word badge.
-    assert.equal(
-        chipView(
-            wire("high", { armedTurn: true, keywordArmed: false }),
-            false,
-            null,
-            true,
-        ).keywordArmed,
-        false,
-    );
-    assert.equal(
-        chipView(
-            wire("high", { armedTurn: false, keywordArmed: true }),
-            false,
-            null,
-            true,
-        ).keywordArmed,
-        false,
-    );
 });
 
 test("chipView refuses presses only while one is in flight or the session has no writer", () => {
@@ -256,7 +223,6 @@ test("every text key the chip can select is in both dictionaries", () => {
             view.ariaKey,
             view.titleKey,
             "chip.busy",
-            "chip.armed",
             "error.action",
         ]) {
             assert.ok(key in zh, `${key} must be in the Chinese dictionary`);

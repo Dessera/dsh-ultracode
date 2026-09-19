@@ -3,24 +3,23 @@
  *
  * DSH's projection registry carries one unit per client-visible key. The
  * registry owns delivery: it folds every committed session event through the
- * unit, computes the view, and broadcasts a frame to every connected browser
- * when that view changes by `Object.is`. That is why this module registers a
- * unit and then does nothing else — there is no publish call, no connection
- * list, and no polling anywhere in the plugin.
+ * unit, computes the view, and notifies its change feed when that view changes
+ * by `Object.is`; the session-control carrier turns that notification into a
+ * frame for every connected browser. That is why this module registers a unit
+ * and then does nothing else — there is no publish call, no connection list, and
+ * no polling anywhere in the plugin.
  *
  * The unit is a pure function of the session log. The registry erases the
  * definition into a fixed shape that forwards only `(state)` and
  * `(state, event)`, and it calls `wire.view` on cold paths as well, where no
- * live agent and no process state exist. The one closure variable is the
- * deployment's alias list, which is a constant of the deployment rather than a
- * fact about a session.
+ * live agent and no process state exist.
  *
  * @module @dessera/dsh-ultracode/projection
  */
 /**
  * The unit definition's shape is the harness's own `ProjectionDefinition`,
  * narrowed to this plugin's key and state type. The two merge tables that key
- * lands in are declared by `./host-contract.ts` through the package's
+ * lands in are declared by `./contract.ts` through the package's
  * pure-type outlet, and the outlet is what that file augments, so neither the
  * host-side context merges nor any runtime code reach either bundle.
  */
@@ -43,19 +42,13 @@ import {
 /** The projection key this unit owns, re-exported for the host entry. */
 export { ULTRACODE_KEY, ULTRACODE_STATE_VERSION };
 
-/** Options one deployment fixes for every session's fold. */
-export interface ProjectionOptions {
-    /** Deployment aliases that name the strongest level. */
-    readonly extraLevels: readonly string[];
-}
-
 /**
  * The unit definition, in the shape the harness's registry accepts.
  *
  * The shape is the harness's own `ProjectionDefinition`, parameterized by this
  * plugin's key, so a change to the registry contract becomes a compile error
  * here rather than a runtime surprise. The state and view stay this plugin's own
- * types because `./host-contract.ts` registers this key in the registry's two
+ * types because `./contract.ts` registers this key in the registry's two
  * merge tables, which is what the parameterization resolves through.
  */
 export type UltracodeProjection = UltracodeProjectionUnit;
@@ -117,20 +110,16 @@ const asViewSchema = (
     schema as unknown as UltracodeWireBlock["viewSchema"];
 
 /**
- * Build the projection unit for one deployment.
+ * Build the projection unit.
  *
  * The two validators pass through {@link asStateSchema} and {@link asViewSchema},
  * which bridge this plugin's plain `{ parse }` objects to the schema type the
  * registry declares. The unit's key, state, view and transition functions are
  * all checked against the harness's own `ProjectionDefinition`, so a change to
  * that contract fails here rather than at runtime.
- * @param options - deployment constants the fold needs.
  * @returns the unit definition to hand to the projection registry.
  */
-export function ultracodeProjection(
-    options: ProjectionOptions,
-): UltracodeRegistration {
-    const { extraLevels } = options;
+export function ultracodeProjection(): UltracodeRegistration {
     return {
         key: ULTRACODE_KEY,
         stateVersion: ULTRACODE_STATE_VERSION,
@@ -140,7 +129,6 @@ export function ultracodeProjection(
             applyProjectionEvent(
                 state,
                 event as Parameters<typeof applyProjectionEvent>[1],
-                extraLevels,
             ),
         wire: {
             viewSchema: asViewSchema(UltracodeWireSchema),
