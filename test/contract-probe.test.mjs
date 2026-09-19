@@ -72,22 +72,10 @@ const HOST_SERVICES = [
         marker: 'super(ctx, "commands")',
     },
     {
-        key: "llm",
-        provider: "@deepseek-ai/dsh-llm",
-        entry: "lib/index.js",
-        marker: 'super(ctx, "llm")',
-    },
-    {
         key: "sessionProjections",
         provider: "@deepseek-ai/dsh-session-projection",
         entry: "lib/index.js",
         marker: 'super(ctx, "sessionProjections")',
-    },
-    {
-        key: "agentDefaultModel",
-        provider: "@deepseek-ai/dsh-agent-default-model",
-        entry: "lib/index.js",
-        marker: 'super(ctx, "agentDefaultModel")',
     },
 ];
 
@@ -201,12 +189,6 @@ const LOG_EVENTS = [
 
 /** One session accessor the host half reads from a live agent. */
 const SESSION_ACCESSORS = [
-    {
-        what: "the request header accessor the plugin reads for the reasoning effort",
-        provider: "@deepseek-ai/dsh-session",
-        entry: "lib/types/index.d.ts",
-        marker: "requestHeader()",
-    },
     {
         what: "the immutable session header the plugin reads for delegation depth",
         provider: "@deepseek-ai/dsh-session",

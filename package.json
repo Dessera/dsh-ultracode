@@ -2,7 +2,7 @@
     "name": "@dessera/dsh-ultracode",
     "version": "0.1.0",
     "private": true,
-    "description": "Ultracode session mode for DeepSeek Harness: a three-position composer control that arms automatic multi-agent workflow orchestration and pins the session's requests to the strongest reasoning effort the model reports when the level is armed.",
+    "description": "Ultracode session mode for DeepSeek Harness: a three-position composer control that arms automatic multi-agent workflow orchestration by injecting an arming banner ahead of the user's own message.",
     "type": "module",
     "engines": {
         "node": "^22.19.0 || >=24.0.0"
@@ -55,7 +55,6 @@
     "devDependencies": {
         "@deepseek-ai/cordis": "4.0.2",
         "@deepseek-ai/dsh-agent": "0.1.6-alpha.2",
-        "@deepseek-ai/dsh-agent-default-model": "0.1.6-alpha.2",
         "@deepseek-ai/dsh-api-remotes": "0.1.6-alpha.2",
         "@deepseek-ai/dsh-api-session-controller": "0.1.6-alpha.2",
         "@deepseek-ai/dsh-client-locale": "0.1.6-alpha.2",

@@ -7,18 +7,12 @@
  * folding the log the session already carries. The plugin appends nothing of its
  * own — a third-party plugin cannot register a durable session event type, so
  * anything it appended would be rejected wholesale when that session is read
- * back — and the mirror exists only so that the banner decision and the effort
- * pin can read the level without waiting for a fold.
+ * back — and the mirror exists only so that the banner decision can read the
+ * level without waiting for a fold.
  *
  * @module @dessera/dsh-ultracode/state
  */
 import { type UltracodeLevel } from "./protocol.ts";
-
-/** A reasoning effort captured before this plugin pinned one. */
-export interface RememberedEffort {
-    /** The effort id in force, or the empty string when none was explicitly requested. */
-    readonly effort: string;
-}
 
 /** What one session remembers between turns. */
 export interface SessionState {
@@ -27,20 +21,14 @@ export interface SessionState {
     /**
      * Whether this session's mirror has already been aligned with the log fold.
      *
-     * The mirror is the synchronous read that banner injection and the effort pin
-     * need. It starts at `off` for every session object, including a resumed one,
-     * so the first time a session is touched the fold is consulted once and the
-     * mirror is seeded from it. After that the mirror is written only through
+     * The mirror is the synchronous read that banner injection needs. It starts
+     * at `off` for every session object, including a resumed one, so the first
+     * time a session is touched the fold is consulted once and the mirror is
+     * seeded from it. After that the mirror is written only through
      * {@link UltracodeStateStore.select}, which applies the same transition rules
      * the fold applies.
      */
     adopted: boolean;
-    /**
-     * Reasoning effort the deployment was running before this session's first
-     * pin. Absent when the session never armed a level, and unknowable after a
-     * host restart, in which case the model's own default applies again.
-     */
-    savedEffort?: RememberedEffort;
     /** Highest turn number already injected for this session. */
     injectedTurn?: number;
 }
@@ -120,8 +108,7 @@ export class UltracodeStateStore {
      * Select one session's level.
      *
      * Selecting the level already in effect reports `unchanged` so the caller can
-     * settle a command without producing a spurious notice, and so the
-     * reasoning-effort pin is not applied twice.
+     * settle a command without producing a spurious notice.
      * @param session - the session whose level changes.
      * @param level - the level to put in effect.
      * @returns whether the level actually changed.
@@ -147,36 +134,5 @@ export class UltracodeStateStore {
         if (state.injectedTurn === turn) return false;
         state.injectedTurn = turn;
         return true;
-    }
-
-    /**
-     * Record the reasoning effort to restore when the level returns to `off`.
-     * A later call never overwrites the first, because the first is the value the
-     * deployment was running before this plugin touched anything.
-     * @param session - the session being pinned.
-     * @param effort - the effort in effect before pinning.
-     */
-    rememberEffort(session: SessionLike, effort: RememberedEffort): void {
-        const state = this.stateOf(session);
-        if (state.savedEffort !== undefined) return;
-        state.savedEffort = effort;
-    }
-
-    /**
-     * Read the effort remembered for restoration.
-     * @param session - the pinned session.
-     * @returns the remembered effort, or undefined when none was recorded.
-     */
-    rememberedEffort(session: SessionLike): RememberedEffort | undefined {
-        return this.states.get(session)?.savedEffort;
-    }
-
-    /**
-     * Forget the remembered effort, so a later arming captures a fresh one.
-     * @param session - the session being released.
-     */
-    forgetEffort(session: SessionLike): void {
-        const state = this.states.get(session);
-        if (state !== undefined) delete state.savedEffort;
     }
 }

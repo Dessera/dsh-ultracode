@@ -2,16 +2,17 @@
 
 English | [中文](README.zh.md)
 
-Ultracode session mode for DeepSeek Harness (DSH). It adds a three-position control to the composer, where each position selects one level the session runs at. A level other than `off` makes the workflow tool DSH provides available to the turns that follow, and fixes the session's requests at the strongest reasoning effort the model reports at the moment the level is armed.
+Ultracode session mode for DeepSeek Harness (DSH). It adds a three-position control to the composer, where each position selects one level the session runs at. A level other than `off` makes the workflow tool DSH provides available to the turns that follow, and injects an instruction block that tells the model how to shape a workflow run.
 
-- `off` leaves a session exactly as DSH ships it, and restores the effort the session was running before the first level was armed; when a host restart has discarded that baseline, the release clears the effort field instead, so the request falls back to the model's own default.
+- `off` leaves a session exactly as DSH ships it: nothing is injected, and the plugin stops changing anything about the session.
 - `high` and `ultra` inject an arming banner directly after the user's own message, so the model learns that the turn is authorised for multi-agent orchestration rather than being forced into it.
 - The level belongs to one session and is recovered after a host restart from that session's own log: from its `/ultracode` command history, or, while that log carries no level command, from the banner message the plugin itself injected. `/ultracode` advances the level, and `/ultracode status` prints the level and whether the workflow tool is visible to the session.
+- The plugin never touches the model's reasoning effort. That setting stays whatever you chose in the composer: arming a level neither raises it, nor restores it when the level goes back to `off`.
 
 ## Architecture
 
-How the plugin is put together — the two parts, the state model, the command set, the format the two
-sides exchange, the fixed effort and where it applies — is described in [docs/architecture.md](docs/architecture.md).
+How the plugin is put together — the two parts, the state model, the command set, and the format the two
+sides exchange — is described in [docs/architecture.md](docs/architecture.md).
 
 ## Install
 

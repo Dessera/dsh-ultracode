@@ -3,20 +3,22 @@
  *
  * The plugin gives one session a three-position orchestration level. While the
  * level is not `off`, a substantive user turn carries a banner that authorizes
- * the workflow tool, and the session's requests ask for the strongest reasoning
- * effort of the route the pin was computed from. The level never enters the log
- * as a record of the plugin's own: a third-party plugin cannot register a
- * durable event type, so the projection unit derives the level from the command
- * lifecycle DSH already records for `/ultracode` and from the banner's own
- * source summary, and host memory holds a per-session mirror for the two
- * decisions that cannot wait for a fold.
+ * the workflow tool. The level never enters the log as a record of the plugin's
+ * own: a third-party plugin cannot register a durable event type, so the
+ * projection unit derives the level from the command lifecycle DSH already
+ * records for `/ultracode` and from the banner's own source summary, and host
+ * memory holds a per-session mirror for the banner decision, which cannot wait
+ * for a fold.
  *
  * The feature has three moving parts:
  *
  * - `agent/pre-step` inserts the banner into the batch that enters the model.
- * - `agent/request` applies the reasoning-effort pin and its release.
- * - The `/ultracode` command changes the level from the message box, and the
- *   session projection publishes the current level to the browser.
+ * - The `/ultracode` command changes the level from the message box.
+ * - The session projection publishes the current level to the browser.
+ *
+ * The plugin reads session state and writes a projection of its own; it never
+ * writes a field of the harness's call configuration, so the reasoning effort a
+ * session runs at stays the user's own choice.
  *
  * @module @dessera/dsh-ultracode
  */
@@ -24,12 +26,6 @@ import type { Context } from "@deepseek-ai/cordis";
 import type { UserMessage } from "@deepseek-ai/dsh-llm";
 
 import { resolveConfig } from "./config.ts";
-import {
-    EffortResolver,
-    withEffortPlan,
-    type EffortBearingConfig,
-    type EffortPlan,
-} from "./effort.ts";
 import { isSubstantiveRequest } from "./heuristics.ts";
 import {
     COMMAND_NAME,
@@ -47,7 +43,7 @@ import { buildInjection, injectionSummary } from "./prompt.ts";
 import { ultracodeProjection, ULTRACODE_KEY } from "./projection.ts";
 import { classifyCommandArgs } from "./reducer.ts";
 import { Config } from "./schema.ts";
-import { UltracodeStateStore, type RememberedEffort } from "./state.ts";
+import { UltracodeStateStore } from "./state.ts";
 
 /** Plugin name registered with the loader. */
 export const name = "dsh-ultracode";
@@ -56,7 +52,7 @@ export const name = "dsh-ultracode";
  * Services this plugin reads. The loader waits for every one of them before
  * `apply` runs.
  */
-export const inject = ["tools", "commands", "llm"];
+export const inject = ["tools", "commands"];
 
 export { Config };
 
@@ -130,42 +126,17 @@ export const apply = (ctx: Context, rawConfig: unknown): (() => void) => {
 
     const tools = contextService(ctx, "tools");
     const commands = contextService(ctx, "commands");
-    const llm = contextService(ctx, "llm");
     // Read without declaring it in `inject`: the projection registry is the
     // plugin's display channel, not a precondition for the command channel, so a
-    // deployment that mounts no projection registry must still arm turns and pin
-    // effort. Every read below tolerates its absence.
+    // deployment that mounts no projection registry must still arm turns. Every
+    // read below tolerates its absence.
     const projections = contextService(ctx, "sessionProjections");
-    // Read without declaring it in `inject`: the deployment default is only a
-    // fallback for the effort this plugin restores, so a composition that
-    // mounts no default-model service must still get the rest of the feature.
-    const defaultModel = contextService(ctx, "agentDefaultModel");
 
     if (commands === undefined) {
         throw new Error(
             "dsh-ultracode: the command registry is unavailable, so /ultracode cannot be registered",
         );
     }
-
-    const effort =
-        llm === undefined
-            ? undefined
-            : new EffortResolver((provider, model, signal) =>
-                  llm.resolveModelInfo(provider, model, signal),
-              );
-
-    /**
-     * Plans applied to the next request of one agent. The pin plan is computed
-     * once per arming — at the moment a level is selected when the session
-     * already carries a readable request header, and otherwise on the first
-     * request of the armed session, which is where a provider and model first
-     * become readable — and the release plan is computed when a level returns to
-     * `off`.
-     */
-    const pinPlans = new WeakMap<object, EffortPlan>();
-    const releasePlans = new WeakMap<object, EffortPlan>();
-    /** Whether the pin plan has already been computed for one agent's level. */
-    const pinResolved = new WeakSet<object>();
 
     /** Whether the configured workflow tool resolves for one agent's scope. */
     const workflowVisible = (agent: AgentLike): boolean =>
@@ -212,91 +183,14 @@ export const apply = (ctx: Context, rawConfig: unknown): (() => void) => {
         return true;
     };
 
-    /** Read the provider/model route one agent currently uses, when readable. */
-    const routeOf = (agent: AgentLike): EffortBearingConfig | undefined => {
-        const route = agent.session.requestHeader?.()?.config;
-        if (
-            route === undefined ||
-            typeof route.provider !== "string" ||
-            typeof route.model !== "string"
-        ) {
-            return undefined;
-        }
-        return {
-            provider: route.provider,
-            model: route.model,
-            reasoningEffort: route.reasoningEffort,
-        };
-    };
-
-    /**
-     * Compute the pin plan for one agent, once per arming.
-     *
-     * The plan is computed lazily on the first request of the armed session,
-     * because the route is only known after the session has produced its first
-     * request header; every later request then reuses it synchronously.
-     */
-    const ensurePinPlan = async (
-        agent: AgentLike,
-    ): Promise<EffortPlan | undefined> => {
-        if (effort === undefined) return undefined;
-        const existing = pinPlans.get(agent);
-        if (existing !== undefined) return existing;
-        if (pinResolved.has(agent)) return undefined;
-        const route = routeOf(agent);
-        if (route === undefined) return undefined;
-        pinResolved.add(agent);
-        const plan = await effort.pinFor(route);
-        if (plan.effort === undefined) return undefined;
-        pinPlans.set(agent, plan);
-        return plan;
-    };
-
-    /**
-     * Read the reasoning effort one session's requests carry right now, as the
-     * value to restore when the level returns to `off`.
-     *
-     * The session's own request header is the authoritative record, but a session
-     * that has not made a request yet has none. In that case the effective value
-     * is the deployment default, which is what the session controller itself
-     * falls back to; reading it keeps the release faithful instead of clearing a
-     * field the deployment had set.
-     * @param agent - the session being armed.
-     * @returns the effort to restore; an empty id means the release clears the field.
-     */
-    const captureEffort = (agent: AgentLike): RememberedEffort => {
-        const header = agent.session.requestHeader?.();
-        const recorded = header?.config?.reasoningEffort;
-        if (typeof recorded === "string") return { effort: recorded };
-        // No usable header: the session has not made a request yet, so ask the
-        // deployment default the session controller would itself fall back to.
-        if (
-            header?.config?.provider === undefined &&
-            defaultModel !== undefined
-        ) {
-            try {
-                const fromDefault =
-                    defaultModel.currentSelection()?.reasoningEffort;
-                if (typeof fromDefault === "string")
-                    return { effort: fromDefault };
-            } catch {
-                /* a failing default-model service leaves the effort unknown */
-            }
-        }
-        // Nothing was in force, so releasing the pin clears the field rather than
-        // inventing a value.
-        return { effort: "" };
-    };
-
     /**
      * Align one session's mirror with the log fold, once.
      *
-     * The mirror is what banner injection and the effort pin read, and it starts
-     * at `off` for every session object. A session whose log already reports a
-     * level — because a previous host process armed it, or because it was resumed
-     * — therefore has to be seeded from the fold before anything reads the
-     * mirror, or the two would silently disagree until the user touched the
-     * control again.
+     * The mirror is what banner injection reads, and it starts at `off` for every
+     * session object. A session whose log already reports a level — because a
+     * previous host process armed it, or because it was resumed — therefore has to
+     * be seeded from the fold before anything reads the mirror, or the two would
+     * silently disagree until the user touched the control again.
      * @param agent - the session's live agent.
      * @returns the folded state, or null when the fold is unreadable.
      */
@@ -307,38 +201,14 @@ export const apply = (ctx: Context, rawConfig: unknown): (() => void) => {
     };
 
     /**
-     * Move one session to a level, capturing or restoring the reasoning effort
-     * that belongs to the transition.
+     * Move one session to a level.
      * @param agent - the session's live agent.
      * @param level - the level to put in effect.
      * @returns whether the level actually changed.
      */
     const changeLevel = (agent: AgentLike, level: UltracodeLevel): boolean => {
         adoptFolded(agent);
-        if (states.select(agent.session, level).kind === "unchanged")
-            return false;
-        if (level === "off") {
-            const remembered = states.rememberedEffort(agent.session);
-            states.forgetEffort(agent.session);
-            pinPlans.delete(agent);
-            pinResolved.delete(agent);
-            // A release always writes a plan. With a remembered baseline it restores
-            // that value; without one — the state of a session whose level came back
-            // from the log after a host restart, where the baseline lived only in the
-            // previous process — it clears the field, so the session stops asking for
-            // the pinned effort instead of keeping it forever.
-            if (effort !== undefined) {
-                releasePlans.set(agent, effort.restorePlan(remembered));
-            }
-            return true;
-        }
-        if (states.rememberedEffort(agent.session) === undefined) {
-            states.rememberEffort(agent.session, captureEffort(agent));
-        }
-        releasePlans.delete(agent);
-        pinResolved.delete(agent);
-        void ensurePinPlan(agent);
-        return true;
+        return states.select(agent.session, level).kind === "changed";
     };
 
     /**
@@ -442,49 +312,10 @@ export const apply = (ctx: Context, rawConfig: unknown): (() => void) => {
     }) as never);
     disposers.push(removePreStep as () => void);
 
-    // The effort pin is applied after every other listener has resolved the call
-    // configuration, so it changes exactly one field of the final answer. The
-    // value it writes is the plan computed for the route this arming started on,
-    // so a model switch during an armed session keeps the provider and model
-    // another listener resolved but not that model's own effort.
-    const removeRequest = ctx.on("agent/request", (async (
-        payload: { agent: AgentLike },
-        next: () => Promise<Record<string, unknown>>,
-    ) => {
-        const resolved = await next();
-        const agent = payload.agent;
-        if (effort === undefined || !isTopLevel(agent)) return resolved;
-        const state = states.stateOf(agent.session);
-
-        if (state.level !== "off") {
-            let plan = pinPlans.get(agent);
-            if (plan === undefined) {
-                const route = resolved as unknown as EffortBearingConfig;
-                if (
-                    typeof route.provider !== "string" ||
-                    typeof route.model !== "string"
-                )
-                    return resolved;
-                pinResolved.add(agent);
-                const computed = await effort.pinFor(route);
-                if (computed.effort === undefined) return resolved;
-                plan = computed;
-                pinPlans.set(agent, plan);
-            }
-            return withEffortPlan(resolved, plan) as Record<string, unknown>;
-        }
-
-        const release = releasePlans.get(agent);
-        if (release === undefined) return resolved;
-        releasePlans.delete(agent);
-        return withEffortPlan(resolved, release) as Record<string, unknown>;
-    }) as never);
-    disposers.push(removeRequest as () => void);
-
     const removeCommand = commands.register({
         name: COMMAND_NAME,
         description:
-            "Ultracode session mode: arm automatic multi-agent orchestration and pin the reasoning effort.",
+            "Ultracode session mode: arm automatic multi-agent orchestration.",
         input: { hint: LEVEL_WORDS },
         handler: (invocation) => {
             const agent = invocation.agent;
@@ -538,11 +369,10 @@ export const apply = (ctx: Context, rawConfig: unknown): (() => void) => {
     // whenever the view changes, and the session-control carrier turns that
     // notification into a frame for every connected browser, so no part of this
     // plugin has to poll, listen for focus, or answer a "what changed" question.
-    // Its
-    // registration is best effort on purpose — a deployment without the registry
-    // still gets the command channel, the banner injection, and the effort pin —
-    // and it is wrapped because a throw here would take the whole plugin row
-    // down, including the command the user may need to recover with.
+    // Its registration is best effort on purpose — a deployment without the
+    // registry still gets the command channel and the banner injection — and it
+    // is wrapped because a throw here would take the whole plugin row down,
+    // including the command the user may need to recover with.
     if (projections !== undefined) {
         try {
             disposers.push(projections.register(ultracodeProjection()));

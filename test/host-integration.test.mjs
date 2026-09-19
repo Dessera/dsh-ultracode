@@ -2,10 +2,9 @@
  * Integration test for the host half.
  *
  * It drives the built plugin through a stubbed host context: the pre-step
- * waterfall, the request waterfall, and a command invocation. That covers the
- * wiring of every channel the plugin owns — which nothing else can check without
- * booting a real host — while leaving the full acceptance walkthrough to the
- * real GUI.
+ * waterfall and a command invocation. That covers the wiring of every channel
+ * the plugin owns — which nothing else can check without booting a real host —
+ * while leaving the full acceptance walkthrough to the real GUI.
  *
  * Every test here that needs a harness installation skips itself when none is
  * reachable, so the file never fails a checkout that has only this plugin.
@@ -63,11 +62,6 @@ function makeContext(options = {}) {
     const session = {
         id: "sess-1",
         header: options.header ?? {},
-        requestHeader: () =>
-            options.requestHeader ?? {
-                config: { provider: "p", model: "m", reasoningEffort: "low" },
-                adapterDefaults: {},
-            },
     };
     const agent = { session };
     /** The unit registered last, which is the only one this fixture serves. */
@@ -116,26 +110,6 @@ function makeContext(options = {}) {
                                 return () => {};
                             },
                         };
-                    }
-                    if (key === "llm") {
-                        return {
-                            resolveModelInfo: async () => ({
-                                reasoning: {
-                                    efforts: [
-                                        { id: "off", name: "Off" },
-                                        { id: "low", name: "Low" },
-                                        { id: "high", name: "High" },
-                                        { id: "max", name: "Max" },
-                                    ],
-                                    defaultEffort: "high",
-                                },
-                            }),
-                        };
-                    }
-                    if (key === "agentDefaultModel") {
-                        const selection = options.defaultSelection;
-                        if (selection === undefined) return undefined;
-                        return { currentSelection: () => selection };
                     }
                     if (key === "sessionProjections") {
                         if (options.projections === false) return undefined;
@@ -214,21 +188,17 @@ test("a bundle that regains a bare import is refused with the specifier named", 
 });
 
 test(
-    "the host half mounts its listeners and its command",
+    "the host half mounts its listener and its command",
     { skip: !available },
     async () => {
         const module = await loadHostBundle(bundlePath);
         const harness = makeContext();
         const dispose = module.apply(harness.ctx, {});
         assert.equal(module.name, "dsh-ultracode");
-        assert.deepEqual(module.inject, ["tools", "commands", "llm"]);
+        assert.deepEqual(module.inject, ["tools", "commands"]);
         assert.ok(
             harness.listeners.has("agent/pre-step"),
             "the pre-step listener must be mounted",
-        );
-        assert.ok(
-            harness.listeners.has("agent/request"),
-            "the request listener must be mounted",
         );
         assert.equal(harness.commands.length, 1);
         assert.equal(harness.commands[0].name, "ultracode");
@@ -237,7 +207,7 @@ test(
         assert.equal(
             harness.listeners.size,
             0,
-            "the disposer must release both listeners",
+            "the disposer must release the listener",
         );
     },
 );
@@ -250,7 +220,6 @@ test(
         const harness = makeContext();
         module.apply(harness.ctx, {});
         const preStep = harness.listeners.get("agent/pre-step");
-        const request = harness.listeners.get("agent/request");
 
         // Select the ultra level through the command, which is what the control does.
         setLevel(harness, "ultra");
@@ -284,40 +253,23 @@ test(
             async () => ({ kind: "enter", messages: [human] }),
         );
         assert.equal(again.messages.length, 1);
-
-        // The request waterfall pins the strongest effort the model reports.
-        const resolved = await request({ agent: harness.agent }, async () => ({
-            provider: "p",
-            model: "m",
-            reasoningEffort: "low",
-            maxTokens: 10,
-        }));
-        assert.equal(resolved.reasoningEffort, "max");
-        assert.equal(resolved.maxTokens, 10);
     },
 );
 
 test(
-    "an unarmed session is never injected and never pinned",
+    "an unarmed session is never injected",
     { skip: !available },
     async () => {
         const module = await loadHostBundle(bundlePath);
         const harness = makeContext();
         module.apply(harness.ctx, {});
         const preStep = harness.listeners.get("agent/pre-step");
-        const request = harness.listeners.get("agent/request");
         const human = humanMessage("帮我重构一下这个模块的解析逻辑并补上单测");
         const decision = await preStep(
             { agent: harness.agent, messages: [human], turn: 1, step: 1 },
             async () => ({ kind: "enter", messages: [human] }),
         );
         assert.equal(decision.messages.length, 1);
-        const resolved = await request({ agent: harness.agent }, async () => ({
-            provider: "p",
-            model: "m",
-            reasoningEffort: "low",
-        }));
-        assert.equal(resolved.reasoningEffort, "low");
     },
 );
 
@@ -448,141 +400,6 @@ test(
         assert.ok(
             fourth.text.includes("高阶"),
             `the rotation must start over from off: ${fourth.text}`,
-        );
-    },
-);
-
-test(
-    "a pin taken on a fresh session releases to the deployment default",
-    { skip: !available },
-    async () => {
-        const module = await loadHostBundle(bundlePath);
-        // No request header yet, which is the state of a session that has not sent
-        // anything; the deployment default is the only record of the effort in force.
-        const harness = makeContext({
-            requestHeader: undefined,
-            defaultSelection: {
-                provider: "p",
-                model: "m",
-                reasoningEffort: "high",
-            },
-        });
-        harness.agent.session.requestHeader = () => undefined;
-        module.apply(harness.ctx, {});
-        const request = harness.listeners.get("agent/request");
-
-        setLevel(harness, "high");
-
-        // While armed, the strongest effort the model reports is requested.
-        const pinned = await request({ agent: harness.agent }, async () => ({
-            provider: "p",
-            model: "m",
-        }));
-        assert.equal(pinned.reasoningEffort, "max");
-
-        setLevel(harness, "off");
-
-        // Releasing restores the deployment default rather than clearing the field.
-        const restored = await request({ agent: harness.agent }, async () => ({
-            provider: "p",
-            model: "m",
-            reasoningEffort: "max",
-        }));
-        assert.equal(restored.reasoningEffort, "high");
-        assert.equal("adapterDefaults" in restored, false);
-    },
-);
-
-test(
-    "a pin taken after a request releases to the effort that request recorded",
-    { skip: !available },
-    async () => {
-        const module = await loadHostBundle(bundlePath);
-        const harness = makeContext({
-            requestHeader: {
-                config: { provider: "p", model: "m", reasoningEffort: "low" },
-                adapterDefaults: {},
-            },
-            defaultSelection: {
-                provider: "p",
-                model: "m",
-                reasoningEffort: "high",
-            },
-        });
-        module.apply(harness.ctx, {});
-        const request = harness.listeners.get("agent/request");
-
-        setLevel(harness, "ultra");
-        const pinned = await request({ agent: harness.agent }, async () => ({
-            provider: "p",
-            model: "m",
-            reasoningEffort: "low",
-        }));
-        assert.equal(pinned.reasoningEffort, "max");
-
-        setLevel(harness, "off");
-        // The logged header wins over the deployment default: it is what this
-        // session was actually running.
-        const restored = await request({ agent: harness.agent }, async () => ({
-            provider: "p",
-            model: "m",
-            reasoningEffort: "max",
-        }));
-        assert.equal(restored.reasoningEffort, "low");
-    },
-);
-
-test(
-    "a release in a process that never captured a baseline clears the pinned effort",
-    { skip: !available },
-    async () => {
-        const module = await loadHostBundle(bundlePath);
-        const harness = makeContext();
-        module.apply(harness.ctx, {});
-        // The level arrives from the log alone, which is the state of a session
-        // resumed after a host restart: the baseline the previous process captured
-        // lived in that process and is gone with it.
-        harness.feedFolded({
-            type: "command/run",
-            seq: 1,
-            data: { commandId: "c1", name: "ultracode", args: "high" },
-        });
-        harness.feedFolded({
-            type: "command/done",
-            seq: 2,
-            data: { commandId: "c1", kind: "success" },
-        });
-        const preStep = harness.listeners.get("agent/pre-step");
-        const request = harness.listeners.get("agent/request");
-
-        // The resumed session runs a turn first, which is what adopts the folded
-        // level into the mirror, and only then sends its request.
-        const human = humanMessage("帮我重构一下这个模块的解析逻辑并补上单测");
-        const decision = await preStep(
-            { agent: harness.agent, messages: [human], turn: 1, step: 1 },
-            async () => ({ kind: "enter", messages: [human] }),
-        );
-        assert.equal(decision.messages.length, 2);
-
-        const pinned = await request({ agent: harness.agent }, async () => ({
-            provider: "p",
-            model: "m",
-            reasoningEffort: "low",
-        }));
-        assert.equal(pinned.reasoningEffort, "max");
-
-        setLevel(harness, "off");
-        // The harness carries a caller-chosen effort forward from the last logged
-        // header, which is how the pin would outlive the level without a release.
-        const released = await request({ agent: harness.agent }, async () => ({
-            provider: "p",
-            model: "m",
-            reasoningEffort: "max",
-        }));
-        assert.equal(
-            "reasoningEffort" in released,
-            false,
-            "a release with no baseline must clear the field instead of keeping the pin",
         );
     },
 );

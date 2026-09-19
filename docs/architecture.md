@@ -9,29 +9,27 @@ constraints the surrounding DeepSeek Harness places on it. It describes the code
 ## What the plugin does
 
 The plugin gives one session a three-position level. The level is the plugin's only product state,
-and it has exactly two effects.
+and it has exactly one effect: it selects the instruction block that the plugin injects into a
+substantive user turn, directly after the last message the human wrote.
 
-- It selects the instruction block that is injected into a substantive user turn, directly after the
-  last message the human wrote.
-- While the level is not `off`, it raises the reasoning effort of that session's requests to the
-  strongest value the route reported when the effort was fixed.
-
-| Level   | Instruction injected after the last human message of a substantive turn                                                                   | Reasoning effort                                                             |
-| ------- | ----------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
-| `off`   | Nothing is injected.                                                                                                                      | No effort is fixed, and returning to `off` releases the effort the plugin raised. |
-| `high`  | The `high` block: a few parallel perspectives, then one adversarial refutation pass.                                                      | Fixed at the strongest effort the route reported when the effort was fixed.  |
-| `ultra` | The `ultra` block: a wide fan-out, rounds that stop only after two consecutive rounds find nothing new, and a closing completeness check. | Fixed at the strongest effort the route reported when the effort was fixed.  |
+| Level   | Instruction injected after the last human message of a substantive turn                                                                   |
+| ------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| `off`   | Nothing is injected.                                                                                                                      |
+| `high`  | The `high` block: a few parallel perspectives, then one adversarial refutation pass.                                                      |
+| `ultra` | The `ultra` block: a wide fan-out, rounds that stop only after two consecutive rounds find nothing new, and a closing completeness check. |
 
 Two consequences of that table are worth stating plainly, because they are easy to misread.
 
-First, the injected text is the only difference between `high` and `ultra`. Both fix the same
-effort, both are gated identically, and both leave the model free to answer directly instead of
-calling the workflow tool.
+First, the injected text is the only difference between `high` and `ultra`. The plugin gates the two
+levels identically, and both leave the model free to answer directly instead of calling the workflow
+tool.
 
 Second, the words `Effort: HIGH` and `Effort: ULTRA` inside the injected text are instructions to
-the model about how to shape a workflow run. They are not the reasoning-effort setting. The
-reasoning-effort setting is a call configuration field that the plugin writes separately, as
-described below.
+the model about how to shape a workflow run. They are not the harness's reasoning-effort setting,
+and they have nothing to do with it. The plugin only reads session state, injects prompt text and
+writes a projection of its own: it registers no `agent/request` listener and never writes a field of
+the harness's call configuration, so the reasoning effort a session runs at stays the value the user
+chose in the composer.
 
 ## The two parts
 
@@ -53,15 +51,14 @@ format, and the harness carries values between them.
 
 | File                              | Responsibility                                                                                                                                                                                     |
 | --------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `src/host/index.ts`               | Plugin entry point. Resolves configuration, registers the command, the pre-step and request waterfalls and the projection unit, and owns the per-session memory mirror and the effort plan caches. |
+| `src/host/index.ts`               | Plugin entry point. Resolves configuration, registers the command, the pre-step waterfall and the projection unit, and owns the per-session memory mirror.                                          |
 | `src/host/config.ts`              | Configuration defaults and resolution. Depends on nothing, so it is unit-testable without a host.                                                                                                  |
 | `src/host/schema.ts`              | The loader-facing schema that validates a deployment's configuration row. It applies the same defaults as `config.ts`.                                                                             |
 | `src/host/protocol.ts`            | The vocabulary both parts share: plugin id, command name, projection key, level vocabulary and aliases, rotation rule, wire shape, and the hand-written parsers.                                  |
 | `src/host/reducer.ts`             | The pure log fold (`applyProjectionEvent`) and the command-argument classifier (`classifyCommandArgs`).                                                                                            |
 | `src/host/projection.ts`          | Builds the projection unit definition that is handed to the registry.                                                                                                                              |
 | `src/host/contract.ts`            | Type-only module. Registers the `ultracode` key in the registry's two merge tables and pulls the host packages' context merges into the program.                                                   |
-| `src/host/state.ts`               | The per-session memory mirror (`UltracodeStateStore`) and the effort baseline it remembers.                                                                                                        |
-| `src/host/effort.ts`              | `EffortResolver`, which decides which effort to fix, and `withEffortPlan`, which applies one decision to a call configuration.                                                                     |
+| `src/host/state.ts`               | The per-session memory mirror (`UltracodeStateStore`).                                                                                                                                             |
 | `src/host/heuristics.ts`          | `isSubstantiveRequest`, the cheap judgement that keeps the banner out of small talk, and the weighted-length measure behind it.                                                                    |
 | `src/host/prompt.ts`              | Assembly of the banner text and the per-level instruction blocks.                                                                                                                                  |
 | `src/host/message.ts`             | Construction of the one frozen message the plugin injects.                                                                                                                                         |
@@ -92,17 +89,17 @@ it by replaying the log tail, which is why a session that was armed before a hos
 armed.
 
 **The memory mirror keeps the feature working without the registry.** `UltracodeStateStore` holds a
-per-session record initialised once from the fold. It exists so that both synchronous decisions stay
-answerable from in-process state: whether to inject a banner during the pre-step waterfall, and
-whether a request is armed and must carry the effort plan. A deployment that mounts no projection
-registry still gets the command channel, the banner injection and the fixed effort; it keeps the
-composer control too, but that control has no value to render and stays in its connecting state.
+per-session record initialised once from the fold. It exists so that the one synchronous decision
+stays answerable from in-process state: whether to inject a banner during the pre-step waterfall. A
+deployment that mounts no projection registry still gets the command channel and the banner
+injection; it keeps the composer control too, but that control has no value to render and stays in
+its connecting state.
 
 Adoption happens once per session object, before anything writes the mirror, so the mirror cannot
 overwrite a level the fold already reports. After adoption the fold stays the authority for what the
-user sees, while the mirror answers the two synchronous questions.
+user sees, while the mirror answers that synchronous question.
 
-## The four host-side behaviours
+## The three host-side behaviours
 
 ### Banner injection
 
@@ -124,42 +121,6 @@ sentence that tells the model to answer directly when the turn turns out to be t
 summary is written by `injectionSummary` as `ultracode <level> armed this turn`, which is the line
 the fold reads back.
 
-### The reasoning-effort fix
-
-`agent/request` is a waterfall that resolves the call configuration for one request. This plugin
-registers a listener that awaits the rest of the waterfall first and then adjusts the resolved
-result, so it leaves the provider and the model another listener resolved untouched and writes only
-the reasoning-effort field. The value it writes is computed once per arming, so a model switch made
-while the level stays armed keeps its own route but not its own effort.
-
-The value comes from the model's own declaration. `EffortResolver` asks
-`ctx.llm.resolveModelInfo` for the provider and model the session was armed on and takes the last
-non-`off` entry of the reported effort list. It does not hard-code a ranking, because the harness
-guarantees that order only as the adapter's preferred display order: the fix assumes the adapter lists
-its efforts weakest first, and a route that lists them strongest first makes the fix select the weaker
-entry. Lookups are cached per provider and model, including failures, and a route that reports no
-usable effort produces no fixed value at all.
-
-The decision is computed once per arming and cached when the route reports a usable effort: the
-plugin pre-runs it when a level is selected, and falls back to computing it on the first request of
-the armed session, where the resolved configuration is the first readable source of a provider and
-model. The plan is then applied on every request while the level stays armed. A route that reports no
-usable effort caches nothing, so that decision is derived again on each request of the armed session.
-
-Returning to `off` writes a release plan:
-
-- if the plugin captured a baseline before it first fixed an effort, that value is written back;
-- if there is no baseline — the state of a session whose level came back from the log after a host
-  restart, because the baseline lived only in the previous process — the field is removed instead,
-  so the request falls back to the model's own default rather than keeping the effort the plugin fixed.
-
-The baseline is read from the session's own request header, or from the deployment default model
-when the session has not made a request yet. An empty baseline means "clear the field on release".
-
-The plugin does not write the harness's `adapterDefaults` marking. The harness recomputes that
-marking from whether the caller supplied the field, so a plugin-supplied value there is ignored, and
-the only value the persisted schema admits is `true`.
-
 ### The `/ultracode` command
 
 One command, no nested subcommands. Its argument text is classified by `classifyCommandArgs`, which
@@ -169,7 +130,7 @@ replays cannot mean different things.
 | Input                          | Effect                                                                   | Answer                                                                                                                                                                                      |
 | ------------------------------ | ------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | nothing, or only blanks        | Advance one level: `off` to `high`, `high` to `ultra`, `ultra` to `off`. | The level notice, or a status line when nothing changed.                                                                                                                                    |
-| `off`, `none`, `close`, `关闭` | Switch the level off and release the fixed effort.                       | The `off` notice.                                                                                                                                                                           |
+| `off`, `none`, `close`, `关闭` | Switch the level off.                                                    | The `off` notice.                                                                                                                                                                           |
 | `high`, `高阶`                 | Switch to `high`.                                                        | The `high` notice.                                                                                                                                                                          |
 | `ultra`, `极致`                | Switch to `ultra`.                                                       | The `ultra` notice.                                                                                                                                                                         |
 | `status`                       | Change nothing.                                                          | One line: the level the fold reports, or the level the in-process mirror holds when no projection registry is mounted or the fold cannot be read, and whether the workflow tool is visible. |
@@ -274,27 +235,23 @@ flowchart TB
         control["control: gate, notify, write the mirror"]
         mirror["Memory mirror per session"]
         prestep["agent/pre-step"]
-        request["agent/request"]
         banner["Banner"]
         registry["Projection registry"]
         unit["Projection unit: applyProjectionEvent"]
     end
 
     log[(Session log)]
-    llmCall[LLM call configuration]
 
     chip -- "execute: /ultracode LEVEL" --> command
     command --> control
     control --> mirror
     mirror --> prestep
-    mirror --> request
     prestep --> banner
     banner -- "commit user/message" --> log
     command -- "command/run and command/done" --> log
     log -- "committed events" --> registry
     registry -- "folds each event" --> unit
     registry -- "frame when the view changes" --> seat
-    request -- "fix or release the effort" --> llmCall
 ```
 
 ## Build and packaging
@@ -319,10 +276,9 @@ flowchart TB
 | -------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `test/ultracode.test.mjs`        | The level vocabulary, the state store, the substantive-message heuristic, and the injected text.                                                                                         |
 | `test/protocol.test.mjs`         | The shared vocabulary, the pure fold, the reference-reuse rule, and the projection unit definition.                                                                                      |
-| `test/config-effort.test.mjs`    | Configuration resolution and the effort planner, including the fixed effort, the release and the field-clearing plan.                                                                     |
 | `test/host-schema.test.mjs`      | That the loader schema and the resolver agree on every default they share.                                                                                                               |
 | `test/notices.test.mjs`          | The user-facing strings of both languages.                                                                                                                                               |
-| `test/host-integration.test.mjs` | The built host bundle driven through a stubbed context: both waterfalls, the command, the projection, and the fixing and release of the effort.                                          |
+| `test/host-integration.test.mjs` | The built host bundle driven through a stubbed context: the pre-step waterfall, the command, and the projection.                                                                          |
 | `test/client-units.test.mjs`     | The client's plain modules: the chip view and the reply narrowing of the write path.                                                                                                     |
 | `test/client-bundle.test.mjs`    | The built client bundle, rendered through a stubbed module loader.                                                                                                                       |
 | `test/contract-probe.test.mjs`   | The names the plugin resolves out of the installed harness, which the compiler cannot check, and the rule that the harness type packages are fixed to exact versions in `package.json`. |
@@ -339,27 +295,13 @@ refusal lives in `test/host-integration.test.mjs`.
 These are properties of the current design, not oversights. Each one is recorded here so that a
 later change is made knowingly.
 
-- **The plugin fixes effort on top-level sessions only.** Its `agent/request` listener skips every
-  other agent, and the workflow tool's `agent()` rejects an `effort` option outright. Agents a
-  workflow starts still do not fall back to the model's own default, because the harness copies the
-  delegating parent's latest request-header route into the child's own options: a subagent inherits
-  the provider, the model and the reasoning effort the parent's header records, and while the session
-  is armed that recorded effort is the fixed one. The inherited effort is dropped only when the
-  child's options name a different provider or model without naming an effort, in which case the
-  selected model resolves its own default.
-- **A model switch does not recompute the fixed effort.** The plan is computed once per arming, so a
-  session that switches models while its level stays armed keeps asking for the effort id of the route
-  it was armed on. When the new model does not declare that effort, the harness refuses the request
-  before any provider I/O; returning to `off` and arming again recomputes it.
-- **A raise that is neither recorded nor remembered is not possible.** The result of the
-  `agent/request` waterfall is exactly what the harness canonicalizes into the durable
-  `request/header` event, and the harness carries a caller-chosen effort forward into later requests.
-  The only unrecorded path is a value the adapter generates itself, and that path cannot be forced
-  to the strongest effort. A per-request boost that leaves the session's recorded effort untouched
-  would therefore need a change in the harness.
-- **The effort baseline is not durable.** It lives in host memory, so a restart loses it and the
-  release clears the field instead of restoring a value it no longer knows.
-- **`high` and `ultra` share one fixed effort.** Their only difference is the injected instruction
-  block.
+- **The plugin stays out of the harness's call configuration.** It registers no `agent/request`
+  listener, so the provider, the model and the reasoning effort of a request are never touched by
+  this plugin. Reasoning effort stays the value the user picked in the composer, and the `Effort:
+  HIGH` and `Effort: ULTRA` words in the injected text are model instructions that have nothing to
+  do with that setting.
+- **`high` and `ultra` differ only in the injected instruction block.** The plugin gates the two
+  levels identically and injects a different block for each; it treats them the same in every other
+  respect.
 - **The level is the only arming path.** There is no separate trigger word, and the command set is
   exactly the table above.

@@ -5,10 +5,9 @@
  * but committed session events, so it can be folded for a session that has no
  * live agent, in a process that has no state store, and on the cold paths the
  * projection registry uses when it lists sessions. The state store keeps a
- * per-session mirror of the level for the two places that need a synchronous
- * read (banner injection and the effort pin); that mirror is seeded from this
- * reducer and written by the same transition rules, never by a second
- * derivation.
+ * per-session mirror of the level for the one place that needs a synchronous
+ * read, banner injection; that mirror is seeded from this reducer and written by
+ * the same transition rules, never by a second derivation.
  *
  * Folding is faithful to what the host already accepts. The plugin never writes
  * a durable event of its own, so the level is recovered from the command

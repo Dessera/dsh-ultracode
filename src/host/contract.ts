@@ -40,16 +40,11 @@ import type { ProjectionDefinition } from "@deepseek-ai/dsh-session-projection";
  * These edges are type-only and empty, which is the form the harness itself
  * uses, and they erase completely at build time — the plugin still declares its
  * services through `inject` and reads them off the context at runtime.
- *
- * The last one is named here even though the plugin treats it as optional.
- * The merge is what types the guarded read, and the optionality lives in the
- * runtime guard rather than in the type.
  */
 import type {} from "@deepseek-ai/dsh-tools";
 import type {} from "@deepseek-ai/dsh-commands";
 import type {} from "@deepseek-ai/dsh-llm";
 import type {} from "@deepseek-ai/dsh-agent";
-import type {} from "@deepseek-ai/dsh-agent-default-model";
 
 import type { UltracodeWire } from "./protocol.ts";
 import type { ProjectionState } from "./reducer.ts";

@@ -2,15 +2,16 @@
 
 [English](README.md) | 中文
 
-DeepSeek Harness（DSH）的 ultracode 会话模式。它在输入框（composer）里加了一个三档控件，每一档对应一个档位（level）：所选档位决定这个会话按哪一档运行；只要档位不是 `off`，后续回合就能看到 DSH 提供的 workflow 工具，同时该会话的请求会被固定为开启档位那一刻模型自报的最强推理强度。
+DeepSeek Harness（DSH）的 ultracode 会话模式。它在输入框（composer）里加了一个三档控件，每一档对应一个档位（level）：所选档位决定这个会话按哪一档运行；只要档位不是 `off`，后续回合就能看到 DSH 提供的 workflow 工具，并会收到一段指令块，告诉模型该怎样组织一次 workflow 编排。
 
-- `off` 让会话回到 DSH 原本的样子，并恢复该会话在第一次开启档位之前所用的推理强度；如果宿主重启已经把那个基线丢掉了，那么关闭档位时改为清空该字段，让请求回落到模型自己的默认值。
+- `off` 让会话回到 DSH 原本的样子：插件不再注入任何内容，也不再改动这个会话的任何状态。
 - `high` 与 `ultra` 会在用户自己的消息之后紧接着注入一段开启提示（banner），让模型知道这一回合已获多智能体编排的授权，而不是被强制去编排。
 - 档位属于单个会话；宿主重启后，插件从该会话自己的日志里把它恢复出来：先看 `/ultracode` 命令历史，当日志里没有任何档位命令时，再看插件自己注入的那段开启提示。`/ultracode` 用来切换档位，`/ultracode status` 打印当前档位以及该会话能否看到 workflow 工具。
+- 插件不碰模型的推理强度（reasoning effort）：那个设置始终是你在输入框里选定的值。开启档位不会把它调高，档位回到 `off` 时也不会把它还原。
 
 ## 架构
 
-插件是怎么拼起来的——两半的分工、状态模型、命令集合、两侧之间的通信格式、effort 固定值与它的适用边界——写在 [docs/architecture.zh.md](docs/architecture.zh.md) 里（英文原件为 [docs/architecture.md](docs/architecture.md)）。
+插件是怎么拼起来的——两半的分工、状态模型、命令集合、两侧之间的通信格式——写在 [docs/architecture.zh.md](docs/architecture.zh.md) 里（英文原件为 [docs/architecture.md](docs/architecture.md)）。
 
 ## 安装
 

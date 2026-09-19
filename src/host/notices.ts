@@ -33,12 +33,9 @@ export const NOTICES: Record<"zh" | "en", NoticeTemplates> = {
             `未知档位「${word}」。可用的档位是：关闭、高阶、极致。`,
         unavailable:
             "当前会话看不到 workflow 工具，因此无法开启 ultracode。请切换到包含该工具的 preset。",
-        levelOff:
-            "Ultracode 档位已关闭：本会话不再注入编排授权，推理强度恢复原值。",
-        levelHigh:
-            "Ultracode 档位已切到高阶：实质性任务将自动编排，推理强度提到该模型的最强档。",
-        levelUltra:
-            "Ultracode 档位已切到极致：实质性任务将大面积展开，推理强度提到该模型的最强档。",
+        levelOff: "Ultracode 档位已关闭：本会话不再注入编排授权。",
+        levelHigh: "Ultracode 档位已切到高阶：实质性任务将自动编排。",
+        levelUltra: "Ultracode 档位已切到极致：实质性任务将大面积展开。",
         status: (level, available) =>
             `Ultracode 档位：${level}；workflow 工具：${available ? "可见" : "不可见"}。`,
     },
@@ -49,11 +46,11 @@ export const NOTICES: Record<"zh" | "en", NoticeTemplates> = {
         unavailable:
             "This session cannot see the workflow tool, so ultracode cannot be armed here. Switch to a preset that includes it.",
         levelOff:
-            "Ultracode level is off: this session stops arming turns and the reasoning effort is restored.",
+            "Ultracode level is off: this session stops arming turns.",
         levelHigh:
-            "Ultracode level is high: substantive tasks are armed for orchestration and reasoning is at its strongest.",
+            "Ultracode level is high: substantive tasks are armed for orchestration.",
         levelUltra:
-            "Ultracode level is ultra: substantive tasks fan out widely and reasoning is at its strongest.",
+            "Ultracode level is ultra: substantive tasks fan out widely.",
         status: (level, available) =>
             `Ultracode level: ${level}; workflow tool: ${available ? "visible" : "not visible"}.`,
     },

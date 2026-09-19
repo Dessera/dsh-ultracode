@@ -93,16 +93,6 @@ test("one turn is injected at most once", () => {
     assert.equal(store.claimInjection(session, 4), true);
 });
 
-test("the first remembered effort wins and can be forgotten", () => {
-    const store = new UltracodeStateStore();
-    const session = sessionOf("s1");
-    store.rememberEffort(session, { effort: "high" });
-    store.rememberEffort(session, { effort: "low" });
-    assert.deepEqual(store.rememberedEffort(session), { effort: "high" });
-    store.forgetEffort(session);
-    assert.equal(store.rememberedEffort(session), undefined);
-});
-
 test("a request with a work verb is substantive without reaching the weight threshold", () => {
     assert.equal(isSubstantiveRequest("帮我重构一下这个模块"), true);
 });

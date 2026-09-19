@@ -8,7 +8,7 @@
  *
  * @module @dessera/dsh-ultracode/prompt
  *
- * The phrasing of the banner and of the two effort instructions is adapted from
+ * The phrasing of the banner and of the two level instructions is adapted from
  * `pi-dynamic-workflows` (<https://github.com/QuintinShaw/pi-dynamic-workflows>),
  * which is MIT licensed; its notice, including the original author's copyright,
  * is carried in the repository's `LICENSE`.
@@ -55,7 +55,7 @@ export const FORBIDDEN_SCRIPT_NAMES: readonly string[] = [
 ];
 
 /**
- * Effort instruction for the high level.
+ * Level instruction for the high level.
  *
  * The adversarial pass is expressed as one more `agent()` call whose prompt
  * asks it to refute, because that is what the engine can actually do; the
@@ -68,7 +68,7 @@ const HIGH_INSTRUCTION = [
 ].join("\n");
 
 /**
- * Effort instruction for the ultra level.
+ * Level instruction for the ultra level.
  *
  * The loop-until-dry rule is written as an instruction to the author of the
  * script, who writes the termination condition in the script itself, and the
@@ -111,7 +111,7 @@ export function buildBanner(): string {
 }
 
 /**
- * Build the effort instruction for one armed level.
+ * Build the instruction for one armed level.
  *
  * Every armed turn carries the escape sentence, because the level arms turns
  * standing rather than per request: the user asked for the mode, not for a
