@@ -1,0 +1,10 @@
+# Prettier reads .gitignore as well, so `node_modules/` and friends are already
+# out of scope. These entries are the ones .gitignore does not cover.
+
+# Owned by pnpm: the next install rewrites it, and a reformat would bury real
+# dependency changes in formatting noise.
+pnpm-lock.yaml
+
+# Build output. Ignored through .gitignore today, stated here so that removing
+# `lib/` from there does not quietly put generated bundles under the formatter.
+lib/

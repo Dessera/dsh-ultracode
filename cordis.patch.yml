@@ -1,0 +1,19 @@
+# Bundle patch for this package: one loader row mounting the host half.
+# The row id is what `- id: dsh-ultracode` targets from a profile patch when
+# the deployment wants a different configuration than the defaults below.
+- insert:
+      - id: dsh-ultracode
+        name: "@dessera/dsh-ultracode"
+        config:
+            # Name of the workflow tool as this deployment registers it. The control
+            # and the injection both resolve visibility through this one name.
+            workflowToolName: workflow
+            # Keyword arming ships disabled: the ultracode level alone decides
+            # whether a turn is armed.
+            keywordTrigger: false
+            # Trigger words for the optional keyword path. They are matched against a
+            # message only while keywordTrigger is true.
+            keywords:
+                - ultracode
+            # Extra level names accepted by /ultracode, on top of off/high/ultra.
+            extraLevels: []
