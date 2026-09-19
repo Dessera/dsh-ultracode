@@ -38,9 +38,11 @@
         "build": "tsdown",
         "typecheck": "tsc --noEmit",
         "lint": "eslint .",
+        "format": "prettier --write .",
+        "format:check": "prettier --check .",
         "test": "node --test \"test/*.test.mjs\"",
         "clean": "rm -rf lib",
-        "check": "pnpm lint && pnpm typecheck && pnpm build && pnpm test",
+        "check": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm build && pnpm test",
         "prepare": "tsdown"
     },
     "keywords": [

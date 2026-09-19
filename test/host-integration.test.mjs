@@ -256,22 +256,18 @@ test(
     },
 );
 
-test(
-    "an unarmed session is never injected",
-    { skip: !available },
-    async () => {
-        const module = await loadHostBundle(bundlePath);
-        const harness = makeContext();
-        module.apply(harness.ctx, {});
-        const preStep = harness.listeners.get("agent/pre-step");
-        const human = humanMessage("帮我重构一下这个模块的解析逻辑并补上单测");
-        const decision = await preStep(
-            { agent: harness.agent, messages: [human], turn: 1, step: 1 },
-            async () => ({ kind: "enter", messages: [human] }),
-        );
-        assert.equal(decision.messages.length, 1);
-    },
-);
+test("an unarmed session is never injected", { skip: !available }, async () => {
+    const module = await loadHostBundle(bundlePath);
+    const harness = makeContext();
+    module.apply(harness.ctx, {});
+    const preStep = harness.listeners.get("agent/pre-step");
+    const human = humanMessage("帮我重构一下这个模块的解析逻辑并补上单测");
+    const decision = await preStep(
+        { agent: harness.agent, messages: [human], turn: 1, step: 1 },
+        async () => ({ kind: "enter", messages: [human] }),
+    );
+    assert.equal(decision.messages.length, 1);
+});
 
 test(
     "a delegated child session is skipped even while armed",

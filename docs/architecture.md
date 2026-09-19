@@ -49,26 +49,26 @@ format, and the harness carries values between them.
 
 ## Source layout
 
-| File                              | Responsibility                                                                                                                                                                                     |
-| --------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `src/host/index.ts`               | Plugin entry point. Resolves configuration, registers the command, the pre-step waterfall and the projection unit, and owns the per-session memory mirror.                                          |
-| `src/host/config.ts`              | Configuration defaults and resolution. Depends on nothing, so it is unit-testable without a host.                                                                                                  |
-| `src/host/schema.ts`              | The loader-facing schema that validates a deployment's configuration row. It applies the same defaults as `config.ts`.                                                                             |
-| `src/host/protocol.ts`            | The vocabulary both parts share: plugin id, command name, projection key, level vocabulary and aliases, rotation rule, wire shape, and the hand-written parsers.                                  |
-| `src/host/reducer.ts`             | The pure log fold (`applyProjectionEvent`) and the command-argument classifier (`classifyCommandArgs`).                                                                                            |
-| `src/host/projection.ts`          | Builds the projection unit definition that is handed to the registry.                                                                                                                              |
-| `src/host/contract.ts`            | Type-only module. Registers the `ultracode` key in the registry's two merge tables and pulls the host packages' context merges into the program.                                                   |
-| `src/host/state.ts`               | The per-session memory mirror (`UltracodeStateStore`).                                                                                                                                             |
-| `src/host/heuristics.ts`          | `isSubstantiveRequest`, the cheap judgement that keeps the banner out of small talk, and the weighted-length measure behind it.                                                                    |
-| `src/host/prompt.ts`              | Assembly of the banner text and the per-level instruction blocks.                                                                                                                                  |
-| `src/host/message.ts`             | Construction of the one frozen message the plugin injects.                                                                                                                                         |
-| `src/host/notices.ts`             | Every user-facing string the host prints, in Chinese and English.                                                                                                                                  |
-| `src/client/index.ts`             | Client entry point. Registers the dictionaries and the composer control slot.                                                                                                                      |
-| `src/client/UltracodeControl.tsx` | The React control rendered in the composer's right-hand tool row.                                                                                                                                  |
-| `src/client/chip.ts`              | `chipView`, the pure function that turns a published value plus local flags into everything the control renders.                                                                                   |
-| `src/client/service.ts`           | The write path: `changeLevel` builds the `/ultracode <level>` command line and hands it to the command executor, and `readOutcome` narrows the remote reply.                                       |
-| `src/client/locales.ts`           | The two dictionaries. The Chinese dictionary is the source of truth for the key set.                                                                                                               |
-| `src/client/contract.ts`          | The control slot props type and the locale-namespace merge.                                                                                                                                        |
+| File                              | Responsibility                                                                                                                                                   |
+| --------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/host/index.ts`               | Plugin entry point. Resolves configuration, registers the command, the pre-step waterfall and the projection unit, and owns the per-session memory mirror.       |
+| `src/host/config.ts`              | Configuration defaults and resolution. Depends on nothing, so it is unit-testable without a host.                                                                |
+| `src/host/schema.ts`              | The loader-facing schema that validates a deployment's configuration row. It applies the same defaults as `config.ts`.                                           |
+| `src/host/protocol.ts`            | The vocabulary both parts share: plugin id, command name, projection key, level vocabulary and aliases, rotation rule, wire shape, and the hand-written parsers. |
+| `src/host/reducer.ts`             | The pure log fold (`applyProjectionEvent`) and the command-argument classifier (`classifyCommandArgs`).                                                          |
+| `src/host/projection.ts`          | Builds the projection unit definition that is handed to the registry.                                                                                            |
+| `src/host/contract.ts`            | Type-only module. Registers the `ultracode` key in the registry's two merge tables and pulls the host packages' context merges into the program.                 |
+| `src/host/state.ts`               | The per-session memory mirror (`UltracodeStateStore`).                                                                                                           |
+| `src/host/heuristics.ts`          | `isSubstantiveRequest`, the cheap judgement that keeps the banner out of small talk, and the weighted-length measure behind it.                                  |
+| `src/host/prompt.ts`              | Assembly of the banner text and the per-level instruction blocks.                                                                                                |
+| `src/host/message.ts`             | Construction of the one frozen message the plugin injects.                                                                                                       |
+| `src/host/notices.ts`             | Every user-facing string the host prints, in Chinese and English.                                                                                                |
+| `src/client/index.ts`             | Client entry point. Registers the dictionaries and the composer control slot.                                                                                    |
+| `src/client/UltracodeControl.tsx` | The React control rendered in the composer's right-hand tool row.                                                                                                |
+| `src/client/chip.ts`              | `chipView`, the pure function that turns a published value plus local flags into everything the control renders.                                                 |
+| `src/client/service.ts`           | The write path: `changeLevel` builds the `/ultracode <level>` command line and hands it to the command executor, and `readOutcome` narrows the remote reply.     |
+| `src/client/locales.ts`           | The two dictionaries. The Chinese dictionary is the source of truth for the key set.                                                                             |
+| `src/client/contract.ts`          | The control slot props type and the locale-namespace merge.                                                                                                      |
 
 ## Where the level lives
 
@@ -272,23 +272,24 @@ flowchart TB
 
 ## Tests
 
-| File                             | Covers                                                                                                                                                                                   |
-| -------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `test/ultracode.test.mjs`        | The level vocabulary, the state store, the substantive-message heuristic, and the injected text.                                                                                         |
-| `test/protocol.test.mjs`         | The shared vocabulary, the pure fold, the reference-reuse rule, and the projection unit definition.                                                                                      |
-| `test/host-schema.test.mjs`      | That the loader schema and the resolver agree on every default they share.                                                                                                               |
-| `test/notices.test.mjs`          | The user-facing strings of both languages.                                                                                                                                               |
-| `test/host-integration.test.mjs` | The built host bundle driven through a stubbed context: the pre-step waterfall, the command, and the projection.                                                                          |
-| `test/client-units.test.mjs`     | The client's plain modules: the chip view and the reply narrowing of the write path.                                                                                                     |
-| `test/client-bundle.test.mjs`    | The built client bundle, rendered through a stubbed module loader.                                                                                                                       |
+| File                             | Covers                                                                                                                                                                                  |
+| -------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `test/ultracode.test.mjs`        | The level vocabulary, the state store, the substantive-message heuristic, and the injected text.                                                                                        |
+| `test/protocol.test.mjs`         | The shared vocabulary, the pure fold, the reference-reuse rule, and the projection unit definition.                                                                                     |
+| `test/host-schema.test.mjs`      | That the loader schema and the resolver agree on every default they share.                                                                                                              |
+| `test/notices.test.mjs`          | The user-facing strings of both languages.                                                                                                                                              |
+| `test/host-integration.test.mjs` | The built host bundle driven through a stubbed context: the pre-step waterfall, the command, and the projection.                                                                        |
+| `test/client-units.test.mjs`     | The client's plain modules: the chip view and the reply narrowing of the write path.                                                                                                    |
+| `test/client-bundle.test.mjs`    | The built client bundle, rendered through a stubbed module loader.                                                                                                                      |
 | `test/contract-probe.test.mjs`   | The names the plugin resolves out of the installed harness, which the compiler cannot check, and the rule that the harness type packages are fixed to exact versions in `package.json`. |
 
 Two guards are deliberate. The contract probe fails loudly when no harness installation is
-reachable, because a suite that silently checked nothing is worse than a red one. The host bundle
-loader refuses an artifact that imports a package by name, because such an artifact would load
-whichever copy of the harness the reader resolves rather than the one the profile runs; that loader is
-a shared helper under `test/support/` rather than a suite of its own, and the test that exercises the
-refusal lives in `test/host-integration.test.mjs`.
+reachable, because a suite that silently checked nothing is worse than a red one; the continuous
+integration job installs one so that the guard has something to read. The host bundle loader refuses
+an artifact that imports a package by name, because such an artifact would load whichever copy of the
+harness the reader resolves rather than the one the profile runs; that loader is a shared helper under
+`test/support/` rather than a suite of its own, and the test that exercises the refusal lives in
+`test/host-integration.test.mjs`.
 
 ## Deliberate limits
 
@@ -297,9 +298,9 @@ later change is made knowingly.
 
 - **The plugin stays out of the harness's call configuration.** It registers no `agent/request`
   listener, so the provider, the model and the reasoning effort of a request are never touched by
-  this plugin. Reasoning effort stays the value the user picked in the composer, and the `Effort:
-  HIGH` and `Effort: ULTRA` words in the injected text are model instructions that have nothing to
-  do with that setting.
+  this plugin. Reasoning effort stays the value the user picked in the composer, and the
+  `Effort: HIGH` and `Effort: ULTRA` words in the injected text are model instructions that have
+  nothing to do with that setting.
 - **`high` and `ultra` differ only in the injected instruction block.** The plugin gates the two
   levels identically and injects a different block for each; it treats them the same in every other
   respect.

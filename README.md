@@ -31,10 +31,15 @@ A checkout builds with Node.js 22.19 or newer on the 22.x line, or with Node.js 
 ```sh
 pnpm install    # installs dependencies and builds, because the prepare script runs tsdown
 pnpm build      # rebuilds after a source change
-pnpm check      # the full gate: lint, typecheck, build, tests
+pnpm format     # rewrites the files Prettier reports
+pnpm check      # the full gate: formatting, lint, typecheck, build, tests
 ```
 
 The build writes two artifacts: `lib/index.js` is the host part, which runs in Node inside DSH, and `lib/client.js` is the browser part, which DSH loads into its web client. `pnpm test` runs the suites on their own, and the bundle tests assert against the built `lib/client.js`, so build before testing a change to the client part.
+
+## Continuous integration
+
+Every push to `main` and every pull request runs `.github/workflows/ci.yml`, which executes `pnpm check` on Node.js 22.x and 24.x. That run installs the harness `test/contract-probe.test.mjs` asserts against, at the versions this repository pins, because a runner has no DSH installation of its own.
 
 ## Sources and acknowledgements
 

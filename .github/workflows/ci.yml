@@ -1,0 +1,82 @@
+# Continuous integration.
+#
+# The job runs the same gate a checkout runs by hand, `pnpm check`, on both
+# Node.js lines the package declares support for. A runner carries no DSH
+# installation, so the job also provisions the harness that the runtime contract
+# probe reads: that probe asserts the plugin's host service keys, browser seed
+# words and session event names against an installed harness, and it fails rather
+# than skips when it finds none.
+
+name: CI
+
+on:
+    push:
+        branches: [main]
+    pull_request:
+    workflow_dispatch:
+
+# A newer run for the same branch replaces an older one instead of queueing
+# behind it.
+concurrency:
+    group: ${{ github.workflow }}-${{ github.ref }}
+    cancel-in-progress: true
+
+permissions:
+    contents: read
+
+jobs:
+    check:
+        name: Node.js ${{ matrix.node }}
+        runs-on: ubuntu-latest
+        strategy:
+            fail-fast: false
+            matrix:
+                node: ["22.x", "24.x"]
+        env:
+            # The probe resolves the harness through `DSH_HOME`. The tree is built
+            # outside the checkout, so no repository tool scans it.
+            DSH_HOME: ${{ runner.temp }}/dsh-harness
+        steps:
+            - uses: actions/checkout@v7
+
+            # Reads the pnpm version from `packageManager`, so the workflow and a
+            # checkout install with the same one.
+            - uses: pnpm/action-setup@v6
+
+            - uses: actions/setup-node@v7
+              with:
+                  node-version: ${{ matrix.node }}
+                  cache: pnpm
+
+            - name: Install dependencies
+              run: pnpm install --frozen-lockfile
+
+            - name: Provision the harness the runtime contract probe reads
+              run: |
+                  set -euo pipefail
+                  version=0.1.6-alpha.2
+                  anchor="$DSH_HOME/profiles/web"
+                  mkdir -p "$anchor"
+                  npm install --prefix "$anchor" --no-save --no-audit --no-fund \
+                      "@deepseek-ai/dsh-agent-loop@$version" \
+                      "@deepseek-ai/dsh-api-gateway@$version" \
+                      "@deepseek-ai/dsh-client-locale@$version" \
+                      "@deepseek-ai/dsh-client-ui-conversation@$version" \
+                      "@deepseek-ai/dsh-client-ui-renderer@$version" \
+                      "@deepseek-ai/dsh-client-ui-session@$version" \
+                      "@deepseek-ai/dsh-commands@$version" \
+                      "@deepseek-ai/dsh-llm@$version" \
+                      "@deepseek-ai/dsh-session@$version" \
+                      "@deepseek-ai/dsh-session-projection@$version" \
+                      "@deepseek-ai/dsh-tools@$version" \
+                      "@deepseek-ai/dsh-web-frontend@$version"
+                  # The browser shell publishes assets only and offers no entry point
+                  # to resolve, so the probe looks for that one package in the profile
+                  # folder itself rather than in its `node_modules`. The installation
+                  # above lands every package in `node_modules`, which is where the
+                  # probe resolves the rest from, so the same tree is exposed at the
+                  # second location too.
+                  ln -s "$anchor/node_modules/@deepseek-ai" "$anchor/@deepseek-ai"
+
+            - name: Run the gate
+              run: pnpm check

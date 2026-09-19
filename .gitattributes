@@ -1,0 +1,5 @@
+# Line endings are normalized to LF in every checkout, so that a Windows working
+# tree and the Linux CI runner hold the same bytes. Without this, `git`'s
+# `core.autocrlf` hands a Windows checkout CRLF files while Prettier, which the
+# format check runs with its default `endOfLine`, expects LF.
+* text=auto eol=lf

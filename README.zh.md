@@ -30,10 +30,15 @@ dsh plugin --profile web add github:Dessera/dsh-ultracode
 ```sh
 pnpm install    # installs dependencies and builds, because the prepare script runs tsdown
 pnpm build      # rebuilds after a source change
-pnpm check      # the full gate: lint, typecheck, build, tests
+pnpm format     # rewrites the files Prettier reports
+pnpm check      # the full gate: formatting, lint, typecheck, build, tests
 ```
 
 构建产出两个文件：`lib/index.js` 是宿主部分，在 DSH 里以 Node 进程运行；`lib/client.js` 是浏览器部分，由 DSH 加载进它的 Web 客户端。`pnpm test` 可以单独跑这些测试套件；其中打包测试断言的对象是构建产物 `lib/client.js`，所以改动客户端部分后要先构建再测试。
+
+## 持续集成
+
+每次推送到 `main` 以及每个拉取请求都会运行 `.github/workflows/ci.yml`：它在 Node.js 22.x 与 24.x 上执行 `pnpm check`。运行器上本来没有 DSH 安装，所以这一趟还会按本仓库固定的版本，装好 `test/contract-probe.test.mjs` 所校验的那套宿主。
 
 ## 来源与致谢
 

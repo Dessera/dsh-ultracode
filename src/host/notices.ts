@@ -45,8 +45,7 @@ export const NOTICES: Record<"zh" | "en", NoticeTemplates> = {
             `Unknown level "${word}". Available levels: off, high, ultra.`,
         unavailable:
             "This session cannot see the workflow tool, so ultracode cannot be armed here. Switch to a preset that includes it.",
-        levelOff:
-            "Ultracode level is off: this session stops arming turns.",
+        levelOff: "Ultracode level is off: this session stops arming turns.",
         levelHigh:
             "Ultracode level is high: substantive tasks are armed for orchestration.",
         levelUltra:
