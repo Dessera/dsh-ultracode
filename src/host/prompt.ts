@@ -7,6 +7,11 @@
  * model through this channel.
  *
  * @module @dessera/dsh-ultracode/prompt
+ *
+ * The phrasing of the banner and of the two effort instructions is adapted from
+ * `pi-dynamic-workflows` (<https://github.com/QuintinShaw/pi-dynamic-workflows>),
+ * which is MIT licensed; its notice, including the original author's copyright,
+ * is carried in the repository's `LICENSE`.
  */
 import type { UltracodeLevel } from "./protocol.ts";
 
@@ -16,6 +21,10 @@ import type { UltracodeLevel } from "./protocol.ts";
  * `buildBanner` emits a `---` separator line above the block, so the injected
  * text starts with that separator and this marker opens the bracketed part on
  * the line below it.
+ *
+ * The marker itself is the one `pi-dynamic-workflows` uses to open its armed
+ * prompt block, and this plugin keeps it so that the two banners read the same
+ * way to a model that has seen either one.
  */
 export const BANNER_OPEN = "[workflows mode armed.";
 

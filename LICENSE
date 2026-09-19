@@ -6,6 +6,13 @@ Portions of this package are derived from dsh-plugin-template
 (<https://github.com/kun2-5code/dsh-plugin-template>),
 Copyright (c) 2026 dsh-plugin-template authors, MIT licensed.
 
+The prompt text this package injects is derived from pi-dynamic-workflows
+(<https://github.com/QuintinShaw/pi-dynamic-workflows>),
+which continues the original pi-dynamic-workflows by Michael Livs.
+That project is MIT licensed, and its notice reads:
+Copyright (c) 2026 QuintinShaw
+Copyright (c) Michael Livs (original pi-dynamic-workflows)
+
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
 in the Software without restriction, including without limitation the rights
