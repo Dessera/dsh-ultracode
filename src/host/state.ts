@@ -29,8 +29,29 @@ export interface SessionState {
      * the fold applies.
      */
     adopted: boolean;
-    /** Highest turn number already injected for this session. */
-    injectedTurn?: number;
+    /**
+     * Identity of the message this session's most recent banner was attached to,
+     * if any.
+     *
+     * The banner is anchored on the message that opened the turn, so that message
+     * identifies the one injection it owns. Identity is the right key because it
+     * is what tells a new prompt apart from the same prompt seen again: a steer
+     * the user types while the agent is already working joins the running turn
+     * instead of opening a new one, and it is a different message, so it carries a
+     * banner of its own.
+     */
+    injectedAnchor?: string;
+    /**
+     * The level whose full instruction block this session has already been told,
+     * if any.
+     *
+     * Injection states the block once per level and a one-line reminder after
+     * that, so this is what tells the two apart. It is deliberately not durable:
+     * it lives in host memory beside the mirror, and a resumed session or a
+     * restarted host starts without it, which is what makes the level's block be
+     * stated again rather than assumed to still be somewhere in the history.
+     */
+    announcedLevel?: UltracodeLevel;
 }
 
 /**
@@ -109,6 +130,12 @@ export class UltracodeStateStore {
      *
      * Selecting the level already in effect reports `unchanged` so the caller can
      * settle a command without producing a spurious notice.
+     *
+     * Leaving for `off` forgets which level's block was announced, so a session
+     * that is armed again later states the block rather than reminding. The turns
+     * between the two arming points can be arbitrarily many, and compaction may
+     * have removed the block from the history in the meantime; a reminder whose
+     * instruction is no longer readable would be worse than stating it again.
      * @param session - the session whose level changes.
      * @param level - the level to put in effect.
      * @returns whether the level actually changed.
@@ -117,22 +144,45 @@ export class UltracodeStateStore {
         const state = this.stateOf(session);
         if (state.level === level) return { kind: "unchanged", level };
         state.level = level;
+        if (level === "off") delete state.announcedLevel;
         return { kind: "changed", level };
     }
 
     /**
-     * Claim the right to inject one banner into one turn.
+     * Claim the right to inject one banner for one anchor message.
      *
      * Injection happens inside a waterfall that also runs for later steps of the
-     * same turn, so the claim is what keeps one turn to one banner.
+     * same turn, so the claim is what keeps one message to one banner. The anchor
+     * is the message the banner would follow, which is stable across those later
+     * steps while the batch itself is not: a later step claims only the tool
+     * results of this turn, and those are not anchors at all.
      * @param session - the session being injected.
-     * @param turn - the turn number the injection would belong to.
-     * @returns whether this call owns the injection for that turn.
+     * @param anchor - identity of the message the banner would follow.
+     * @returns whether this call owns the injection for that message.
      */
-    claimInjection(session: SessionLike, turn: number): boolean {
+    claimInjection(session: SessionLike, anchor: string): boolean {
         const state = this.stateOf(session);
-        if (state.injectedTurn === turn) return false;
-        state.injectedTurn = turn;
+        if (state.injectedAnchor === anchor) return false;
+        state.injectedAnchor = anchor;
+        return true;
+    }
+
+    /**
+     * Decide how one armed turn should be stated, and record the decision.
+     *
+     * The first turn of a level, and the first turn after the level changes,
+     * states the whole block; every turn after that carries the one-line
+     * reminder. Recording the level here rather than at the call site keeps the
+     * decision and the memory of it in one place, so a caller cannot state a
+     * block twice by forgetting to write the field back.
+     * @param session - the session being injected.
+     * @param level - the level this turn is armed at.
+     * @returns whether this turn must state the level's full block.
+     */
+    announce(session: SessionLike, level: UltracodeLevel): boolean {
+        const state = this.stateOf(session);
+        if (state.announcedLevel === level) return false;
+        state.announcedLevel = level;
         return true;
     }
 }

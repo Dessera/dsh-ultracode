@@ -45,6 +45,38 @@ function syntheticMessage(text) {
     };
 }
 
+/** Build the tool result that opens a later step of the same turn. */
+function toolResultMessage() {
+    return {
+        id: `m-${Math.random().toString(36).slice(2)}`,
+        role: "user",
+        content: [
+            {
+                type: "tool-result",
+                toolCallId: "call-1",
+                content: [{ type: "text", text: "ok" }],
+                isError: false,
+            },
+        ],
+        source: { kind: "tool", callId: "call-1" },
+    };
+}
+
+/** Build a goal-round message, which is what an automatic continuation carries. */
+function goalMessage(text) {
+    return {
+        id: `m-${Math.random().toString(36).slice(2)}`,
+        role: "user",
+        content: [{ type: "text", text }],
+        source: {
+            kind: "goal",
+            goalId: "goal-1",
+            revision: 1,
+            round: 1,
+        },
+    };
+}
+
 /** A host context stub that records registrations and exposes one live agent. */
 function makeContext(options = {}) {
     const listeners = new Map();
@@ -213,7 +245,7 @@ test(
 );
 
 test(
-    "an armed level injects one banner after the human message",
+    "an armed level injects one banner after the message that opens the turn",
     { skip: !available },
     async () => {
         const module = await loadHostBundle(bundlePath);
@@ -239,7 +271,7 @@ test(
         assert.equal(
             decision.messages[1].id,
             human.id,
-            "the banner goes directly after the human message",
+            "the banner goes directly after the opening message",
         );
         const banner = decision.messages[2];
         assert.equal(banner.source.kind, "plugin");
@@ -247,12 +279,222 @@ test(
         assert.ok(banner.content[0].text.includes("Effort: ULTRA"));
         assert.ok(banner.content[0].text.includes("standing ultracode mode"));
 
-        // A later step of the same turn must not stack a second banner.
+        // A later step of the same turn must not stack a second banner. Its batch
+        // holds only this turn's own tool result, which is not an opening at all.
+        const toolResult = toolResultMessage();
         const again = await preStep(
-            { agent: harness.agent, messages: [human], turn: 1, step: 2 },
-            async () => ({ kind: "enter", messages: [human] }),
+            { agent: harness.agent, messages: [toolResult], turn: 1, step: 2 },
+            async () => ({ kind: "enter", messages: [toolResult] }),
         );
         assert.equal(again.messages.length, 1);
+    },
+);
+
+test(
+    "a turn with no opening message is never injected",
+    { skip: !available },
+    async () => {
+        const module = await loadHostBundle(bundlePath);
+        const harness = makeContext();
+        module.apply(harness.ctx, {});
+        setLevel(harness, "high");
+        const preStep = harness.listeners.get("agent/pre-step");
+        const toolResult = toolResultMessage();
+        const decision = await preStep(
+            { agent: harness.agent, messages: [toolResult], turn: 1, step: 3 },
+            async () => ({ kind: "enter", messages: [toolResult] }),
+        );
+        assert.equal(
+            decision.messages.length,
+            1,
+            "a batch of tool results alone opens no turn",
+        );
+    },
+);
+
+test(
+    "every turn is injected, however short its message is",
+    { skip: !available },
+    async () => {
+        const module = await loadHostBundle(bundlePath);
+        const harness = makeContext();
+        module.apply(harness.ctx, {});
+        setLevel(harness, "high");
+        const preStep = harness.listeners.get("agent/pre-step");
+
+        // The three shapes that used to be refused: a bare continuation, a short
+        // question, and a greeting.
+        for (const [index, text] of ["继续", "这样对吗？", "你好"].entries()) {
+            const human = humanMessage(text);
+            const turn = index + 1;
+            const decision = await preStep(
+                { agent: harness.agent, messages: [human], turn, step: 1 },
+                async () => ({ kind: "enter", messages: [human] }),
+            );
+            assert.equal(
+                decision.messages.length,
+                2,
+                `"${text}" must be injected while the level is armed`,
+            );
+            assert.equal(decision.messages[1].source.plugin, "dsh-ultracode");
+        }
+    },
+);
+
+test(
+    "a goal continuation round is injected like any other turn",
+    { skip: !available },
+    async () => {
+        const module = await loadHostBundle(bundlePath);
+        const harness = makeContext();
+        module.apply(harness.ctx, {});
+        setLevel(harness, "ultra");
+        const preStep = harness.listeners.get("agent/pre-step");
+
+        const round = goalMessage("<goal_round>Objective: finish the sweep");
+        const decision = await preStep(
+            { agent: harness.agent, messages: [round], turn: 2, step: 1 },
+            async () => ({ kind: "enter", messages: [round] }),
+        );
+        assert.equal(
+            decision.messages.length,
+            2,
+            "an automatic continuation round must carry the banner",
+        );
+        assert.equal(decision.messages[1].source.plugin, "dsh-ultracode");
+    },
+);
+
+test(
+    "re-arming after off states the block again",
+    { skip: !available },
+    async () => {
+        const module = await loadHostBundle(bundlePath);
+        const harness = makeContext();
+        module.apply(harness.ctx, {});
+        const preStep = harness.listeners.get("agent/pre-step");
+
+        const bannerFor = async (text, turn) => {
+            const human = humanMessage(text);
+            const decision = await preStep(
+                { agent: harness.agent, messages: [human], turn, step: 1 },
+                async () => ({ kind: "enter", messages: [human] }),
+            );
+            return decision.messages.length === 2
+                ? decision.messages[1].content[0].text
+                : "";
+        };
+
+        setLevel(harness, "high");
+        assert.ok((await bannerFor("第一轮", 1)).includes("Effort: HIGH"));
+        assert.ok(!(await bannerFor("第二轮", 2)).includes("Effort: HIGH"));
+
+        // Turning the level off and on again must not leave the session on the
+        // reminder: the block is stated once more, because compaction may have
+        // removed the earlier one while the level was off.
+        setLevel(harness, "off");
+        const dark = await bannerFor("关档期间的这一轮", 3);
+        assert.equal(dark, "", "an unarmed turn injects nothing");
+        setLevel(harness, "high");
+        assert.ok(
+            (await bannerFor("重新开启后的这一轮", 4)).includes("Effort: HIGH"),
+            "re-arming after off must state the block again",
+        );
+    },
+);
+
+test(
+    "the first turn states the block and later turns carry the reminder",
+    { skip: !available },
+    async () => {
+        const module = await loadHostBundle(bundlePath);
+        const harness = makeContext();
+        module.apply(harness.ctx, {});
+        setLevel(harness, "high");
+        const preStep = harness.listeners.get("agent/pre-step");
+
+        const bannerFor = async (text, turn) => {
+            const human = humanMessage(text);
+            const decision = await preStep(
+                { agent: harness.agent, messages: [human], turn, step: 1 },
+                async () => ({ kind: "enter", messages: [human] }),
+            );
+            assert.equal(decision.messages.length, 2, `turn ${turn} injected`);
+            return decision.messages[1].content[0].text;
+        };
+
+        const first = await bannerFor("先做一次完整的编排", 1);
+        assert.ok(
+            first.includes("Effort: HIGH"),
+            "the first turn of a level states its full block",
+        );
+
+        const second = await bannerFor("再来一轮", 2);
+        assert.ok(
+            !second.includes("Effort: HIGH"),
+            "a later turn must not repeat the block",
+        );
+        assert.ok(
+            second.includes("high"),
+            "the reminder must still name the level",
+        );
+
+        // Changing the level states the new level's block, because the two levels
+        // differ in exactly that text.
+        setLevel(harness, "ultra");
+        const third = await bannerFor("换成极致档再跑", 3);
+        assert.ok(
+            third.includes("Effort: ULTRA"),
+            "a level change must state the new block",
+        );
+
+        const fourth = await bannerFor("继续这一档", 4);
+        assert.ok(
+            !fourth.includes("Effort: ULTRA"),
+            "the unchanged level must fall back to the reminder",
+        );
+    },
+);
+
+test(
+    "a steer typed into a running turn carries a banner of its own",
+    { skip: !available },
+    async () => {
+        const module = await loadHostBundle(bundlePath);
+        const harness = makeContext();
+        module.apply(harness.ctx, {});
+        setLevel(harness, "high");
+        const preStep = harness.listeners.get("agent/pre-step");
+
+        const first = humanMessage("先看一下这个模块");
+        const opened = await preStep(
+            { agent: harness.agent, messages: [first], turn: 1, step: 1 },
+            async () => ({ kind: "enter", messages: [first] }),
+        );
+        assert.equal(opened.messages.length, 2);
+
+        // A steer joins the running turn, so the turn number is unchanged while the
+        // message is new. It must still be injected.
+        const steer = humanMessage("顺便把单测也补上");
+        const steered = await preStep(
+            {
+                agent: harness.agent,
+                messages: [toolResultMessage(), steer],
+                turn: 1,
+                step: 2,
+            },
+            async () => ({
+                kind: "enter",
+                messages: [toolResultMessage(), steer],
+            }),
+        );
+        assert.equal(
+            steered.messages.length,
+            3,
+            "the steer must carry a banner despite the unchanged turn",
+        );
+        assert.equal(steered.messages[1].id, steer.id);
+        assert.equal(steered.messages[2].source.plugin, "dsh-ultracode");
     },
 );
 

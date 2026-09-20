@@ -9,20 +9,26 @@ constraints the surrounding DeepSeek Harness places on it. It describes the code
 ## What the plugin does
 
 The plugin gives one session a three-position level. The level is the plugin's only product state,
-and it has exactly one effect: it selects the instruction block that the plugin injects into a
-substantive user turn, directly after the last message the human wrote.
+and it has exactly one effect: while the level is not `off`, every turn that session opens carries
+injected text directly after the message that opened it.
 
-| Level   | Instruction injected after the last human message of a substantive turn                                                                   |
+| Level   | Instruction injected after the message that opens an armed turn                                                                           |
 | ------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
 | `off`   | Nothing is injected.                                                                                                                      |
 | `high`  | The `high` block: a few parallel perspectives, then one adversarial refutation pass.                                                      |
 | `ultra` | The `ultra` block: a wide fan-out, rounds that stop only after two consecutive rounds find nothing new, and a closing completeness check. |
 
-Two consequences of that table are worth stating plainly, because they are easy to misread.
+What the text is depends on whether the level has already been announced in that session. The first
+turn of a level carries the complete block; every turn after that carries a one-line reminder. A
+level change states the block again, because the block is exactly what differs between `high` and
+`ultra`.
 
-First, the injected text is the only difference between `high` and `ultra`. The plugin gates the two
-levels identically, and both leave the model free to answer directly instead of calling the workflow
-tool.
+Three consequences of that table are worth stating plainly, because they are easy to misread.
+
+First, the level is the whole gate. The plugin does not look at how long a message is, nor does it
+judge whether the message is a task: a question, a one-word follow-up and an automatic continuation
+round are all injected like any other turn. A step whose batch opens no turn is not injected, because
+that step is only the turn's own continuation.
 
 Second, the words `Effort: HIGH` and `Effort: ULTRA` inside the injected text are instructions to
 the model about how to shape a workflow run. They are not the harness's reasoning-effort setting,
@@ -59,8 +65,7 @@ format, and the harness carries values between them.
 | `src/host/projection.ts`          | Builds the projection unit definition that is handed to the registry.                                                                                            |
 | `src/host/contract.ts`            | Type-only module. Registers the `ultracode` key in the registry's two merge tables and pulls the host packages' context merges into the program.                 |
 | `src/host/state.ts`               | The per-session memory mirror (`UltracodeStateStore`).                                                                                                           |
-| `src/host/heuristics.ts`          | `isSubstantiveRequest`, the cheap judgement that keeps the banner out of small talk, and the weighted-length measure behind it.                                  |
-| `src/host/prompt.ts`              | Assembly of the banner text and the per-level instruction blocks.                                                                                                |
+| `src/host/prompt.ts`              | Assembly of the banner text, the per-level instruction blocks, and the one-line reminder a repeat turn carries.                                                  |
 | `src/host/message.ts`             | Construction of the one frozen message the plugin injects.                                                                                                       |
 | `src/host/notices.ts`             | Every user-facing string the host prints, in Chinese and English.                                                                                                |
 | `src/client/index.ts`             | Client entry point. Registers the dictionaries and the composer control slot.                                                                                    |
@@ -103,7 +108,7 @@ user sees, while the mirror answers that synchronous question.
 
 ### Banner injection
 
-`agent/pre-step` inserts one message after the last message a human wrote. The banner is placed
+`agent/pre-step` inserts one message after the message that opened the turn. The banner is placed
 there rather than appended at the end, because the workspace instruction baseline sits at the end of
 the batch and a concrete user request should stay more specific than it.
 
@@ -113,13 +118,32 @@ Injection happens only when every one of these holds:
 - the session is top-level, meaning it is neither a subagent session nor a delegated child,
 - the mirror reports a level other than `off`,
 - the configured workflow tool resolves in that session's tool scope,
-- the batch contains a human-authored message, and its text passes `isSubstantiveRequest`,
-- no banner has been claimed for that turn yet.
+- the batch contains an opening message that has not been injected for yet.
 
-The injected message carries the complete block: the `high` or `ultra` instruction, plus one escape
-sentence that tells the model to answer directly when the turn turns out to be trivial. Its source
-summary is written by `injectionSummary` as `ultracode <level> armed this turn`, which is the line
-the fold reads back.
+The **opening message** is the last message in the batch the inbox handed to this step that does not
+stand for the turn's own continuation. Two sources are skipped: a tool result, because it continues
+this turn rather than opening one, and a banner this plugin injected, because the runtime re-queues
+the messages an abandoned step had claimed and anchoring on one would inject a second banner for the
+same opening. Human messages, `/goal` continuation rounds and runtime notices such as a settled
+subagent all count, so every turn an armed session opens is injected however short its message is
+and whether or not it is a question.
+
+What is injected depends on whether the level has been announced yet. The first turn of a level
+carries the complete block: the `high` or `ultra` instruction, plus one escape sentence that tells
+the model to answer directly when the turn turns out to be trivial. Every turn after that carries
+the one-line reminder built by `buildReminder`. A level change states the block again, because the
+block is what differs between the two levels. The announced level lives in host memory and never
+enters the log, so a host restart or a resume announces the block once more rather than assuming it
+is still in the context.
+
+Both forms carry a source summary written by `injectionSummary` as `ultracode <level> armed this
+turn`, which is the line the fold reads back; the summary does not distinguish the two forms,
+because the fold only cares about the level.
+
+**One banner per turn opening** is decided by the identity of the anchoring message, not by the turn
+number. That is deliberate: a steer a person types while the agent is already working joins the
+running turn, leaving the turn number unchanged while the message is new, and it still carries a
+banner of its own.
 
 ### The `/ultracode` command
 
@@ -274,7 +298,7 @@ flowchart TB
 
 | File                             | Covers                                                                                                                                                                                  |
 | -------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `test/ultracode.test.mjs`        | The level vocabulary, the state store, the substantive-message heuristic, and the injected text.                                                                                        |
+| `test/ultracode.test.mjs`        | The level vocabulary, the state store, the two injected text forms, and the banner itself.                                                                                              |
 | `test/protocol.test.mjs`         | The shared vocabulary, the pure fold, the reference-reuse rule, and the projection unit definition.                                                                                     |
 | `test/host-schema.test.mjs`      | That the loader schema and the resolver agree on every default they share.                                                                                                              |
 | `test/notices.test.mjs`          | The user-facing strings of both languages.                                                                                                                                              |
@@ -304,5 +328,9 @@ later change is made knowingly.
 - **`high` and `ultra` differ only in the injected instruction block.** The plugin gates the two
   levels identically and injects a different block for each; it treats them the same in every other
   respect.
+- **The level is the only gate.** The plugin does not look at how long a message is, nor does it
+  judge whether the message is a task: while the level is not `off`, every turn the session opens is
+  injected. What actually leaves the model free not to orchestrate is the escape sentence in the
+  injected text, not a guess the plugin makes about the message.
 - **The level is the only arming path.** There is no separate trigger word, and the command set is
   exactly the table above.

@@ -2,13 +2,14 @@
  * Host half of the ultracode plugin.
  *
  * The plugin gives one session a three-position orchestration level. While the
- * level is not `off`, a substantive user turn carries a banner that authorizes
- * the workflow tool. The level never enters the log as a record of the plugin's
- * own: a third-party plugin cannot register a durable event type, so the
- * projection unit derives the level from the command lifecycle DSH already
- * records for `/ultracode` and from the banner's own source summary, and host
- * memory holds a per-session mirror for the banner decision, which cannot wait
- * for a fold.
+ * level is not `off`, every turn that session opens carries a banner that
+ * authorizes the workflow tool — the level is the whole gate, so the banner does
+ * not depend on what the message says or how long it is. The level never enters
+ * the log as a record of the plugin's own: a third-party plugin cannot register a
+ * durable event type, so the projection unit derives the level from the command
+ * lifecycle DSH already records for `/ultracode` and from the banner's own source
+ * summary, and host memory holds a per-session mirror for the banner decision,
+ * which cannot wait for a fold.
  *
  * The feature has three moving parts:
  *
@@ -26,7 +27,6 @@ import type { Context } from "@deepseek-ai/cordis";
 import type { UserMessage } from "@deepseek-ai/dsh-llm";
 
 import { resolveConfig } from "./config.ts";
-import { isSubstantiveRequest } from "./heuristics.ts";
 import {
     COMMAND_NAME,
     isUltracodeLevel,
@@ -39,7 +39,7 @@ import {
 } from "./protocol.ts";
 import { createBannerMessage } from "./message.ts";
 import { NOTICES } from "./notices.ts";
-import { buildInjection, injectionSummary } from "./prompt.ts";
+import { buildInjection, buildReminder, injectionSummary } from "./prompt.ts";
 import { ultracodeProjection, ULTRACODE_KEY } from "./projection.ts";
 import { classifyCommandArgs } from "./reducer.ts";
 import { Config } from "./schema.ts";
@@ -268,13 +268,19 @@ export const apply = (ctx: Context, rawConfig: unknown): (() => void) => {
 
     const disposers: Array<() => void> = [];
 
-    // The banner is inserted into the batch that enters the model, after the last
-    // message the human actually wrote. Appending at the end would place the
-    // standing instruction baseline below the concrete user request, which
-    // inverts the "more specific instructions win" reading that the workspace
-    // instructions rely on.
+    // The banner opens the turn: it is inserted directly after the message the
+    // turn was opened by, and therefore ahead of the context the runtime appends
+    // to the same batch. Appending it at the end instead would place the standing
+    // instruction baseline below the concrete request, which inverts the "more
+    // specific instructions win" reading that the workspace instructions rely on.
+    //
+    // Every turn an armed session opens is injected, whatever its message says
+    // and however short it is: the level is the whole gate, so a question, a
+    // one-word follow-up, and a continuation round all carry the banner. What the
+    // turn is injected with does vary — the level's block the first time, one
+    // reminder line after that — and that difference is the only one.
     const removePreStep = ctx.on("agent/pre-step", (async (
-        payload: { agent: AgentLike; messages: StepMessage[]; turn: number },
+        payload: { agent: AgentLike; messages: StepMessage[] },
         next: () => Promise<{ kind: string; messages: StepMessage[] }>,
     ) => {
         const decision = await next();
@@ -290,21 +296,30 @@ export const apply = (ctx: Context, rawConfig: unknown): (() => void) => {
         if (state.level === "off") return decision;
         if (!workflowVisible(agent)) return decision;
 
-        const humanIndex = lastHumanIndex(decision.messages);
-        if (humanIndex < 0) return decision;
-        const text = textOf(decision.messages[humanIndex]);
-        if (!isSubstantiveRequest(text)) return decision;
+        const anchorIndex = openingIndex(payload.messages);
+        if (anchorIndex < 0) return decision;
+        const anchor = payload.messages[anchorIndex];
+        if (anchor === undefined) return decision;
 
-        if (!states.claimInjection(agent.session, payload.turn))
-            return decision;
+        // Every reason to skip is resolved before anything is written back, because
+        // the claim and the announcement are both one-shot: consuming either for a
+        // step that does not actually inject would leave the opening that does
+        // inject with a reminder, or with no banner at all.
+        const position = decision.messages.findIndex(
+            (message) => message.id === anchor.id,
+        );
+        if (position < 0) return decision;
+        if (!states.claimInjection(agent.session, anchor.id)) return decision;
 
         const banner = createBannerMessage(
-            buildInjection(state.level),
+            states.announce(agent.session, state.level)
+                ? buildInjection(state.level)
+                : buildReminder(state.level),
             name,
             injectionSummary(state.level),
         );
         const messages = decision.messages.toSpliced(
-            humanIndex + 1,
+            position + 1,
             0,
             banner as unknown as StepMessage,
         );
@@ -412,40 +427,32 @@ function settle(
 }
 
 /**
- * Find the last message in one batch that a human wrote.
+ * Find the message that opens one turn's batch.
  *
- * A user-role message can be direct human input, plugin-injected context, or a
- * goal-continuation turn; only the message source tells them apart, so the
- * banner is anchored on the source rather than on position or length.
- * @param messages - the messages entering the step.
- * @returns the index of the last human message, or -1 when there is none.
+ * The batch the pre-step waterfall carries is not the whole request: it is what
+ * the inbox handed over for this step, and the runtime's own context — the
+ * snapshot, the workspace instructions, the skill catalog — is appended to it
+ * afterwards. So the message that opens a turn is the last one in the batch that
+ * still stands for something being asked of the model.
+ *
+ * Two sources do not. A tool result is this turn's own continuation rather than a
+ * new opening, and a banner this plugin injected is either the injection this
+ * very decision is about to make or one the runtime re-queued from an abandoned
+ * step; anchoring on either would inject a second banner for the same opening.
+ * The last remaining message is the anchor, because it is the newest thing the
+ * model is being asked to act on and a batch can carry more than one.
+ * @param messages - the batch the inbox handed to this step.
+ * @returns the index of the anchoring message, or -1 when the batch holds none.
  */
-function lastHumanIndex(messages: readonly StepMessage[]): number {
+function openingIndex(messages: readonly StepMessage[]): number {
     for (let index = messages.length - 1; index >= 0; index -= 1) {
         const message = messages[index];
-        if (message !== undefined && message.source?.kind === "user")
-            return index;
+        if (message === undefined) continue;
+        const source = message.source as
+            { kind?: unknown; plugin?: unknown } | undefined;
+        if (source?.kind === "tool") continue;
+        if (source?.kind === "plugin" && source.plugin === name) continue;
+        return index;
     }
     return -1;
-}
-
-/**
- * Read the plain text of one message.
- * @param message - the message to read.
- * @returns the concatenated text blocks.
- */
-function textOf(message: StepMessage | undefined): string {
-    if (message === undefined) return "";
-    let text = "";
-    for (const block of message.content ?? []) {
-        if (
-            typeof block === "object" &&
-            block !== null &&
-            (block as { type?: string }).type === "text"
-        ) {
-            const value = (block as { text?: unknown }).text;
-            if (typeof value === "string") text += `${value}\n`;
-        }
-    }
-    return text;
 }

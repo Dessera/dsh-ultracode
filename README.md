@@ -5,7 +5,8 @@ English | [中文](README.zh.md)
 Ultracode session mode for DeepSeek Harness (DSH). It adds a three-position control to the composer, where each position selects one level the session runs at. A level other than `off` makes the workflow tool DSH provides available to the turns that follow, and injects an instruction block that tells the model how to shape a workflow run.
 
 - `off` leaves a session exactly as DSH ships it: nothing is injected, and the plugin stops changing anything about the session.
-- `high` and `ultra` inject an arming banner directly after the user's own message, so the model learns that the turn is authorised for multi-agent orchestration rather than being forced into it.
+- `high` and `ultra` inject an arming banner directly after the message that opens each turn, so the model learns that the turn is authorised for multi-agent orchestration rather than being forced into it. Every armed turn carries the banner, however short its message is and whether or not it is a question.
+- The first turn of a level carries the complete instruction block; every turn after that carries a one-line reminder instead, so a long session does not repeat the whole block on every request. Changing the level states the block again, because the block is exactly what differs between the two levels.
 - The level belongs to one session and is recovered after a host restart from that session's own log: from its `/ultracode` command history, or, while that log carries no level command, from the banner message the plugin itself injected. `/ultracode` advances the level, and `/ultracode status` prints the level and whether the workflow tool is visible to the session.
 - The plugin never touches the model's reasoning effort. That setting stays whatever you chose in the composer: arming a level neither raises it, nor restores it when the level goes back to `off`.
 

@@ -127,11 +127,34 @@ export function buildInstruction(level: UltracodeLevel): string {
 
 /**
  * Assemble the complete injected block for one armed turn.
+ *
+ * This is the block a session is told once per level: it is what defines what
+ * `high` or `ultra` asks of a workflow run. Later turns of the same level carry
+ * {@link buildReminder} instead.
  * @param level - the armed level.
  * @returns the banner followed by the level instruction.
  */
 export function buildInjection(level: UltracodeLevel): string {
     return `${buildBanner()}\n\n${buildInstruction(level)}`;
+}
+
+/**
+ * Build the one line a repeat armed turn carries instead of the full block.
+ *
+ * It states what a later turn still needs and nothing else: the level in effect,
+ * so the block it belongs to is unambiguous; the fact that the authorization
+ * still stands; and the escape hatch, which is why a trivial turn is still
+ * answered directly. Everything the block explains is normally still in the
+ * session's history, so repeating it every turn would buy nothing while being
+ * paid for on every request. The line is written to stand on its own anyway,
+ * because compaction can remove the block it belongs to and a reminder referring
+ * to an instruction the model can no longer read would be worse than no reminder.
+ * @param level - the armed level.
+ * @returns the reminder, or the empty string for the `off` level.
+ */
+export function buildReminder(level: UltracodeLevel): string {
+    if (level === "off") return "";
+    return `---\n[workflows mode armed at ${level}; the workflow tool is authorized for real work, and a trivial turn is answered directly.]`;
 }
 
 /**

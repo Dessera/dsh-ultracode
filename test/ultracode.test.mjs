@@ -1,6 +1,6 @@
 /**
  * Pure-function tests for the level vocabulary, the per-session state store,
- * the Chinese-aware heuristics, and the injected text.
+ * and the injected text.
  *
  * Everything under test is deliberately free of host dependencies, so these
  * tests run against the TypeScript sources directly with no build step.
@@ -10,16 +10,12 @@ import { test } from "node:test";
 
 import { isUltracodeLevel, parseUltracodeLevel } from "../src/host/protocol.ts";
 import {
-    isSubstantiveRequest,
-    weightedLength,
-    SUBSTANTIVE_WEIGHT_THRESHOLD,
-} from "../src/host/heuristics.ts";
-import {
     BANNER_CLOSE,
     BANNER_OPEN,
     buildBanner,
     buildInjection,
     buildInstruction,
+    buildReminder,
     FORBIDDEN_SCRIPT_NAMES,
     injectionSummary,
     SCRIPT_SURFACE,
@@ -84,83 +80,73 @@ test("a level change reports whether it changed anything", () => {
     assert.equal(store.select(session, "off").kind, "changed");
 });
 
-test("one turn is injected at most once", () => {
+test("one anchor message is injected at most once", () => {
     const store = new UltracodeStateStore();
     const session = sessionOf("s1");
-    assert.equal(store.claimInjection(session, 3), true);
-    assert.equal(store.claimInjection(session, 3), false);
-    // A later turn claims its own injection.
-    assert.equal(store.claimInjection(session, 4), true);
+    assert.equal(store.claimInjection(session, "m-1"), true);
+    assert.equal(store.claimInjection(session, "m-1"), false);
+    // A later message claims its own injection, which is what lets a steer typed
+    // into a running turn carry a banner even though the turn number is unchanged.
+    assert.equal(store.claimInjection(session, "m-2"), true);
 });
 
-test("a request with a work verb is substantive without reaching the weight threshold", () => {
-    assert.equal(isSubstantiveRequest("帮我重构一下这个模块"), true);
+test("a level states its block once and reminds on every turn after that", () => {
+    const store = new UltracodeStateStore();
+    const session = sessionOf("s1");
+    assert.equal(store.announce(session, "high"), true);
+    assert.equal(store.announce(session, "high"), false);
+    assert.equal(store.announce(session, "high"), false);
+    // A real change states the new level's block, because the two levels differ
+    // in exactly that text.
+    assert.equal(store.announce(session, "ultra"), true);
+    assert.equal(store.announce(session, "ultra"), false);
+    // Leaving and re-entering a level states it again rather than reminding.
+    assert.equal(store.announce(session, "high"), true);
 });
 
-test("a message long enough on weight alone is substantive with no work verb in it", () => {
-    const text = "xy".repeat(32);
-    assert.equal(weightedLength(text), 16);
-    assert.equal(isSubstantiveRequest(text), true);
-});
+test("leaving for off makes the next arming state the block again", () => {
+    const store = new UltracodeStateStore();
+    const session = sessionOf("s1");
+    store.select(session, "high");
+    assert.equal(store.announce(session, "high"), true);
+    assert.equal(store.announce(session, "high"), false);
 
-test("a message one weighted unit short of the threshold is not substantive", () => {
-    const text = "xy".repeat(30);
-    assert.equal(weightedLength(text), 15);
-    assert.equal(isSubstantiveRequest(text), false);
-});
-
-test("a greeting is not substantive", () => {
-    assert.equal(isSubstantiveRequest("你好"), false);
-    assert.equal(isSubstantiveRequest("thanks!"), false);
-    assert.equal(isSubstantiveRequest("   "), false);
-});
-
-test("a slash command line is never substantive", () => {
-    assert.equal(isSubstantiveRequest("/ultracode ultra"), false);
-});
-
-test("a question too light to call work is not substantive", () => {
-    assert.equal(weightedLength("这样对吗？"), 4);
-    assert.equal(isSubstantiveRequest("这样对吗？"), false);
-});
-
-test("a long question is refused while its weight is still under the ceiling", () => {
-    const question =
-        "为什么帮我重构一下这个模块的解析逻辑呢帮我重构一下这个模块的解";
-    assert.equal(weightedLength(question), 31);
-    assert.equal(isSubstantiveRequest(question), false);
-});
-
-test("a question of exactly the ceiling weight is accepted as work", () => {
-    const question =
-        "为什么帮我重构一下这个模块的解析逻辑呢帮我重构一下这个模块的解析";
-    assert.equal(weightedLength(question), 32);
-    assert.equal(isSubstantiveRequest(question), true);
-});
-
-test("a question that carries a work verb is admitted by the verb rule", () => {
-    const text = "重构这个模块";
-    assert.equal(weightedLength(text), 6);
-    assert.equal(isSubstantiveRequest(text), true);
-});
-
-test("work verb or not, a message under the minimum weight is not substantive", () => {
-    assert.equal(weightedLength("fix"), 0.75);
-    assert.equal(isSubstantiveRequest("fix"), false);
-});
-
-test("a short imperative with a work verb is substantive", () => {
-    assert.equal(isSubstantiveRequest("重构它"), true);
-});
-
-test("weighted length counts four Latin letters as one glyph", () => {
-    assert.equal(weightedLength("abcd"), 1);
-    assert.equal(weightedLength("重构"), 2);
-    assert.equal(weightedLength("帮我重构一下这个模块"), 10);
-    assert.ok(
-        weightedLength("帮我重构一下这个模块的解析逻辑并补上单测") >=
-            SUBSTANTIVE_WEIGHT_THRESHOLD,
+    // Turning the level off forgets the announcement: the turns in between can be
+    // arbitrarily many, and compaction may have removed the block by the time the
+    // session is armed again, so the block is stated rather than assumed readable.
+    store.select(session, "off");
+    store.select(session, "high");
+    assert.equal(
+        store.announce(session, "high"),
+        true,
+        "re-arming after off must state the block again",
     );
+});
+
+test("the reminder names the level and still lets a trivial turn through", () => {
+    for (const level of ["high", "ultra"]) {
+        const reminder = buildReminder(level);
+        assert.ok(
+            reminder.includes(level),
+            `${level} reminder must name its level`,
+        );
+        assert.ok(
+            reminder.includes("trivial"),
+            `${level} reminder must keep the escape hatch`,
+        );
+    }
+    assert.equal(buildReminder("off"), "");
+});
+
+test("the reminder is far shorter than the block it replaces", () => {
+    // The whole point of the reminder is that a long session does not pay for the
+    // full block on every turn, so the two must not drift into being alike.
+    for (const level of ["high", "ultra"]) {
+        assert.ok(
+            buildReminder(level).length * 4 < buildInjection(level).length,
+            `${level} reminder is not meaningfully shorter than its block`,
+        );
+    }
 });
 
 test("the banner names only the script surface the engine provides", () => {
@@ -178,13 +164,14 @@ test("the banner names only the script surface the engine provides", () => {
 
 test("no generated text names a hook the engine does not provide", () => {
     for (const level of ["high", "ultra"]) {
-        const text = buildInjection(level);
-        for (const forbidden of FORBIDDEN_SCRIPT_NAMES) {
-            assert.equal(
-                text.includes(forbidden),
-                false,
-                `${level} must not name ${forbidden}`,
-            );
+        for (const text of [buildInjection(level), buildReminder(level)]) {
+            for (const forbidden of FORBIDDEN_SCRIPT_NAMES) {
+                assert.equal(
+                    text.includes(forbidden),
+                    false,
+                    `${level} must not name ${forbidden}`,
+                );
+            }
         }
     }
 });
