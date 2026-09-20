@@ -4,7 +4,10 @@
  * The plugin gives one session a three-position orchestration level. While the
  * level is not `off`, every turn that session opens carries a banner that
  * authorizes the workflow tool — the level is the whole gate, so the banner does
- * not depend on what the message says or how long it is. The level never enters
+ * not depend on what the message says or how long it is. The turn that follows a
+ * level being turned off carries a notice instead, because a banner is injected
+ * only for a turn that is armed and the model has otherwise not been told that
+ * the authorization ended. The level never enters
  * the log as a record of the plugin's own: a third-party plugin cannot register a
  * durable event type, so the projection unit derives the level from the command
  * lifecycle DSH already records for `/ultracode` and from the banner's own source
@@ -13,7 +16,8 @@
  *
  * The feature has three moving parts:
  *
- * - `agent/pre-step` inserts the banner into the batch that enters the model.
+ * - `agent/pre-step` inserts the banner — or the disarm notice — into the batch
+ *   that enters the model.
  * - The `/ultracode` command changes the level from the message box.
  * - The session projection publishes the current level to the browser.
  *
@@ -39,7 +43,13 @@ import {
 } from "./protocol.ts";
 import { createBannerMessage } from "./message.ts";
 import { NOTICES } from "./notices.ts";
-import { buildInjection, buildReminder, injectionSummary } from "./prompt.ts";
+import {
+    buildDisarmNotice,
+    buildInjection,
+    buildReminder,
+    disarmSummary,
+    injectionSummary,
+} from "./prompt.ts";
 import { ultracodeProjection, ULTRACODE_KEY } from "./projection.ts";
 import { classifyCommandArgs } from "./reducer.ts";
 import { Config } from "./schema.ts";
@@ -279,6 +289,10 @@ export const apply = (ctx: Context, rawConfig: unknown): (() => void) => {
     // one-word follow-up, and a continuation round all carry the banner. What the
     // turn is injected with does vary — the level's block the first time, one
     // reminder line after that — and that difference is the only one.
+    //
+    // The turn that follows a level being turned off carries one notice instead,
+    // which is why the off branch below is not the early return it used to be:
+    // that notice is the turn's only account of the mode having ended.
     const removePreStep = ctx.on("agent/pre-step", (async (
         payload: { agent: AgentLike; messages: StepMessage[] },
         next: () => Promise<{ kind: string; messages: StepMessage[] }>,
@@ -293,30 +307,57 @@ export const apply = (ctx: Context, rawConfig: unknown): (() => void) => {
         // nothing.
         adoptFolded(agent);
         const state = states.stateOf(agent.session);
-        if (state.level === "off") return decision;
-        if (!workflowVisible(agent)) return decision;
-
+        const stepLevel = state.level;
+        // A turn with no opening message is not injected either way. The check
+        // resolves before the level does, so a batch of this turn's own tool
+        // results leaves any pending notice for the turn that does open.
         const anchorIndex = openingIndex(payload.messages);
         if (anchorIndex < 0) return decision;
         const anchor = payload.messages[anchorIndex];
         if (anchor === undefined) return decision;
+        const position = decision.messages.findIndex(
+            (message) => message.id === anchor.id,
+        );
+        if (position < 0) return decision;
+        if (stepLevel === "off") {
+            // Turning the level off is never announced to the model on its own,
+            // because no banner is injected for a turn that is not armed. This
+            // notice is the one thing an unarmed turn carries: it is owed by the
+            // transition and delivered once, so the model stops reading the
+            // standing instruction an earlier turn handed it.
+            //
+            // The claim writes the notice's own anchor field and leaves the
+            // banner's alone: that one records which opening already carries an
+            // arming banner, and a notice must not make a later arming look
+            // delivered.
+            if (!states.claimDisarm(agent.session, anchor.id)) return decision;
+            states.consumeDisarm(agent.session);
+            const notice = createBannerMessage(
+                buildDisarmNotice(),
+                name,
+                disarmSummary(),
+            );
+            const messages = decision.messages.toSpliced(
+                position + 1,
+                0,
+                notice as unknown as StepMessage,
+            );
+            return { ...decision, messages };
+        }
+        if (!workflowVisible(agent)) return decision;
 
         // Every reason to skip is resolved before anything is written back, because
         // the claim and the announcement are both one-shot: consuming either for a
         // step that does not actually inject would leave the opening that does
         // inject with a reminder, or with no banner at all.
-        const position = decision.messages.findIndex(
-            (message) => message.id === anchor.id,
-        );
-        if (position < 0) return decision;
         if (!states.claimInjection(agent.session, anchor.id)) return decision;
 
         const banner = createBannerMessage(
-            states.announce(agent.session, state.level)
-                ? buildInjection(state.level)
-                : buildReminder(state.level),
+            states.announce(agent.session, stepLevel)
+                ? buildInjection(stepLevel)
+                : buildReminder(stepLevel),
             name,
-            injectionSummary(state.level),
+            injectionSummary(stepLevel),
         );
         const messages = decision.messages.toSpliced(
             position + 1,

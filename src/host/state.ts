@@ -52,6 +52,32 @@ export interface SessionState {
      * stated again rather than assumed to still be somewhere in the history.
      */
     announcedLevel?: UltracodeLevel;
+    /**
+     * Whether this session left an armed level and still owes the next turn the
+     * notice that says so.
+     *
+     * Turning the level off takes the workflow authorization away while the
+     * model may still be reading the standing instruction an earlier turn
+     * carried, so the next turn is told that the mode is over. The notice is
+     * owed only once: it is consumed by the turn that actually carries it, and
+     * re-arming clears it, because a session that is armed again is better
+     * served by the new level's block than by a stale account of the level that
+     * ended.
+     *
+     * Like {@link announcedLevel} this is deliberately not durable: it describes
+     * a transition between two levels, and a recovered session is told its level
+     * again by the banner rather than by a notice about a transition that
+     * happened before the restart.
+     */
+    disarmPending?: boolean;
+    /**
+     * Identity of the message a disarm notice has already been claimed for.
+     *
+     * The claim is idempotent for the same reason the banner's is: a step the
+     * runtime abandons hands its messages back, and a later step carries the
+     * same opening message, which must not collect a second notice.
+     */
+    disarmAnchor?: string;
 }
 
 /**
@@ -136,6 +162,10 @@ export class UltracodeStateStore {
      * between the two arming points can be arbitrarily many, and compaction may
      * have removed the block from the history in the meantime; a reminder whose
      * instruction is no longer readable would be worse than stating it again.
+     *
+     * That same transition is also what owes the next turn a notice: a level that
+     * was in force and is now `off` is a change the model has not been told
+     * about, while a session that never left `off` has nothing to report.
      * @param session - the session whose level changes.
      * @param level - the level to put in effect.
      * @returns whether the level actually changed.
@@ -143,8 +173,17 @@ export class UltracodeStateStore {
     select(session: SessionLike, level: UltracodeLevel): LevelChange {
         const state = this.stateOf(session);
         if (state.level === level) return { kind: "unchanged", level };
+        const wasArmed = state.level !== "off";
         state.level = level;
-        if (level === "off") delete state.announcedLevel;
+        if (level === "off") {
+            delete state.announcedLevel;
+            if (wasArmed) state.disarmPending = true;
+        } else {
+            // The level is in force again, so the account of the level that ended
+            // is stale: the turn that follows is injected by the banner instead.
+            delete state.disarmPending;
+            delete state.disarmAnchor;
+        }
         return { kind: "changed", level };
     }
 
@@ -184,5 +223,41 @@ export class UltracodeStateStore {
         if (state.announcedLevel === level) return false;
         state.announcedLevel = level;
         return true;
+    }
+
+    /**
+     * Claim the right to inject the disarm notice for one anchor message.
+     *
+     * The claim is what makes the notice one-shot without making it lossy. It is
+     * taken only while the notice is owed and only once per anchoring message, so
+     * a step the runtime abandons — and whose opening message therefore comes
+     * back on the next step — does not collect the notice twice; the pending flag
+     * itself stays set until {@link consumeDisarm}, so a step that decides not to
+     * inject leaves the notice for a step that does.
+     * @param session - the session being injected.
+     * @param anchor - identity of the message the notice would follow.
+     * @returns whether this call owns the notice for that message.
+     */
+    claimDisarm(session: SessionLike, anchor: string): boolean {
+        const state = this.stateOf(session);
+        if (state.disarmPending !== true) return false;
+        if (state.disarmAnchor === anchor) return false;
+        state.disarmAnchor = anchor;
+        return true;
+    }
+
+    /**
+     * Mark one session's disarm notice as delivered.
+     *
+     * Called once the notice is actually part of the entering batch. Everything
+     * the caller resolved before that point — a refused step, a batch with no
+     * opening message, a level that is armed again — leaves the flag alone, so
+     * the notice reaches the turn it was owed to.
+     * @param session - the session that was told.
+     */
+    consumeDisarm(session: SessionLike): void {
+        const state = this.stateOf(session);
+        delete state.disarmPending;
+        delete state.disarmAnchor;
     }
 }

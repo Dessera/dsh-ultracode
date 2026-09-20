@@ -13,9 +13,11 @@ import {
     BANNER_CLOSE,
     BANNER_OPEN,
     buildBanner,
+    buildDisarmNotice,
     buildInjection,
     buildInstruction,
     buildReminder,
+    disarmSummary,
     FORBIDDEN_SCRIPT_NAMES,
     injectionSummary,
     SCRIPT_SURFACE,
@@ -138,6 +140,80 @@ test("the reminder names the level and still lets a trivial turn through", () =>
     assert.equal(buildReminder("off"), "");
 });
 
+test("leaving an armed level owes the next turn one disarm notice", () => {
+    const store = new UltracodeStateStore();
+    const session = sessionOf("s1");
+
+    // A session that has never been armed owes nothing: there is no ended mode to
+    // report, and the notice would be noise on every ordinary turn.
+    assert.equal(store.claimDisarm(session, "m-1"), false);
+
+    store.select(session, "high");
+    store.select(session, "off");
+    assert.equal(
+        store.claimDisarm(session, "m-2"),
+        true,
+        "a level that ended must be reported",
+    );
+    // The same opening message comes back on a later step when the runtime abandons
+    // one, so the claim has to be idempotent for the message it already served.
+    assert.equal(
+        store.claimDisarm(session, "m-2"),
+        false,
+        "one opening message collects one notice",
+    );
+    assert.equal(store.claimDisarm(session, "m-3"), true);
+
+    // Delivering the notice settles the debt for good.
+    store.consumeDisarm(session);
+    assert.equal(store.claimDisarm(session, "m-4"), false);
+
+    // Turning the level off again from off changes nothing, so nothing is owed.
+    assert.equal(store.select(session, "off").kind, "unchanged");
+    assert.equal(store.claimDisarm(session, "m-5"), false);
+});
+
+test("re-arming drops the notice the ended level was owed", () => {
+    const store = new UltracodeStateStore();
+    const session = sessionOf("s1");
+    store.select(session, "ultra");
+    store.select(session, "off");
+    assert.equal(store.claimDisarm(session, "m-1"), true);
+
+    // The user armed the session again before the notice reached a turn, so the
+    // account of the level that ended is stale and must not be injected beside the
+    // new level's own banner.
+    store.select(session, "high");
+    assert.equal(store.claimDisarm(session, "m-2"), false);
+});
+
+test("the disarm notice reports the mode without claiming a level", () => {
+    const notice = buildDisarmNotice();
+    // It is a notice that something ended, so it must not open the armed block.
+    assert.equal(notice.startsWith(`---\n${BANNER_OPEN}`), false);
+    assert.equal(notice.endsWith(BANNER_CLOSE), true);
+    // The fold reads a level out of a source summary by looking for a level word,
+    // so a summary that named one would read as an arming rather than a disarming.
+    const summary = disarmSummary();
+    for (const level of ["high", "ultra", "off"]) {
+        assert.equal(
+            new RegExp(`\\b${level}\\b`, "u").test(summary),
+            false,
+            `the disarm summary must not name the ${level} level`,
+        );
+    }
+});
+
+test("the disarm notice never names a hook the engine does not provide", () => {
+    const notice = buildDisarmNotice();
+    for (const forbidden of FORBIDDEN_SCRIPT_NAMES) {
+        assert.equal(
+            notice.includes(forbidden),
+            false,
+            `the notice must not name ${forbidden}`,
+        );
+    }
+});
 test("the reminder is far shorter than the block it replaces", () => {
     // The whole point of the reminder is that a long session does not pay for the
     // full block on every turn, so the two must not drift into being alike.
@@ -211,6 +287,32 @@ test("the injected banner is wrapped in the stable open and close markers", () =
 test("the summary the injector writes is the one the fold reads back", () => {
     assert.equal(foldBanner("high").level, "high");
     assert.equal(foldBanner("ultra").level, "ultra");
+});
+
+test("the fold reads a disarm notice as no level at all", () => {
+    // The notice is a message from this plugin with a source summary, which is the
+    // same shape the fold reads levels out of, so it must leave the level exactly
+    // as it found it in both directions: a session it disarmed must not read as
+    // armed, and a level recovered from an earlier banner must not be rolled back.
+    const foldNotice = (state) =>
+        applyProjectionEvent(state, {
+            type: "user/message",
+            seq: 2,
+            data: {
+                source: {
+                    kind: "plugin",
+                    plugin: "dsh-ultracode",
+                    form: "notice",
+                    summary: disarmSummary(),
+                },
+            },
+        });
+    assert.equal(foldNotice(initialProjectionState()).level, "off");
+    assert.equal(
+        foldNotice(foldBanner("ultra")).level,
+        "ultra",
+        "a notice must not roll back the level a banner carried",
+    );
 });
 
 test("the injected banner message is frozen all the way down", () => {

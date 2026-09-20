@@ -6,6 +6,11 @@
  * banner, so a workspace file cannot close the bracketed block or address the
  * model through this channel.
  *
+ * Three kinds of text are built here: the banner that authorizes a workflow for
+ * one turn, the level instruction a turn is injected with, and the one-off
+ * notice that tells a session its orchestration authorization has been taken
+ * away.
+ *
  * @module @dessera/dsh-ultracode/prompt
  *
  * The phrasing of the banner and of the two level instructions is adapted from
@@ -155,6 +160,45 @@ export function buildInjection(level: UltracodeLevel): string {
 export function buildReminder(level: UltracodeLevel): string {
     if (level === "off") return "";
     return `---\n[workflows mode armed at ${level}; the workflow tool is authorized for real work, and a trivial turn is answered directly.]`;
+}
+
+/**
+ * Build the notice a session carries on the turn after its level was turned
+ * off, so the model does not keep reaching for a tool the session no longer
+ * authorizes.
+ *
+ * It is written to be the only text that turn needs, the same way
+ * {@link buildReminder} is: the turn that follows a level change may sit far
+ * from the block that explained the mode, and compaction may have removed it.
+ *
+ * Unlike the banner and the two level instructions, this text does not open
+ * with {@link BANNER_OPEN}: nothing is armed, and a model looking for the armed
+ * marker would find it in a notice that arms nothing.
+ * @returns the notice text.
+ */
+export function buildDisarmNotice(): string {
+    return [
+        "---",
+        "[workflows mode off. The ultracode level was turned off before this",
+        "message, so this turn does not authorize calling the workflow tool.",
+        "Answer normally: do not start a workflow run, do not fan out across",
+        "subagents, and do not treat the earlier standing instruction as still",
+        "in force.]",
+    ].join("\n");
+}
+
+/**
+ * One line recording that a session was disarmed, for the message source.
+ *
+ * The fold reads a level out of a source summary by looking for a level word in
+ * it, so this line deliberately names none at all. A summary containing `high`
+ * or `ultra` would read as a banner arming that level, and even `off` is a word
+ * the fold recognises — which would make an unreadable log fall back to `off`
+ * instead of leaving the level it recovered alone.
+ * @returns the one-line summary recorded on the message source.
+ */
+export function disarmSummary(): string {
+    return "ultracode mode ended before this turn";
 }
 
 /**

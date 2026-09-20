@@ -391,14 +391,191 @@ test(
 
         // Turning the level off and on again must not leave the session on the
         // reminder: the block is stated once more, because compaction may have
-        // removed the earlier one while the level was off.
+        // removed the earlier one while the level was off. The turn in between is
+        // the one that reports the mode ending, and it must not authorize anything.
         setLevel(harness, "off");
         const dark = await bannerFor("关档期间的这一轮", 3);
-        assert.equal(dark, "", "an unarmed turn injects nothing");
+        assert.ok(
+            dark.includes("workflows mode off"),
+            `the turn after a disarm must say so: ${dark}`,
+        );
+        assert.ok(
+            !dark.includes("Effort: HIGH") && !dark.includes("Effort: ULTRA"),
+            "the notice must not carry a level instruction",
+        );
         setLevel(harness, "high");
         assert.ok(
             (await bannerFor("重新开启后的这一轮", 4)).includes("Effort: HIGH"),
             "re-arming after off must state the block again",
+        );
+    },
+);
+
+test(
+    "the turn after a disarm carries one notice and later turns carry none",
+    { skip: !available },
+    async () => {
+        const module = await loadHostBundle(bundlePath);
+        const harness = makeContext();
+        module.apply(harness.ctx, {});
+        setLevel(harness, "ultra");
+        setLevel(harness, "off");
+        const preStep = harness.listeners.get("agent/pre-step");
+
+        const turnWith = async (text, turn) => {
+            const human = humanMessage(text);
+            return preStep(
+                { agent: harness.agent, messages: [human], turn, step: 1 },
+                async () => ({ kind: "enter", messages: [human] }),
+            );
+        };
+
+        const owed = await turnWith("关档之后的第一条", 1);
+        assert.equal(owed.messages.length, 2);
+        assert.equal(
+            owed.messages[0].source.kind,
+            "user",
+            "the notice follows the message that opened the turn",
+        );
+        assert.equal(owed.messages[1].source.plugin, "dsh-ultracode");
+        assert.equal(
+            owed.messages[1].source.summary,
+            "ultracode mode ended before this turn",
+        );
+        assert.ok(
+            owed.messages[1].content[0].text.includes("workflows mode off"),
+        );
+
+        // The notice is owed once. The session is off from here on, so every later
+        // turn is a plain unarmed turn again.
+        const later = await turnWith("关档之后的第二条", 2);
+        assert.equal(
+            later.messages.length,
+            1,
+            "a disarmed session must not keep reporting the mode",
+        );
+    },
+);
+
+test(
+    "re-arming before the notice is delivered drops the notice",
+    { skip: !available },
+    async () => {
+        const module = await loadHostBundle(bundlePath);
+        const harness = makeContext();
+        module.apply(harness.ctx, {});
+        setLevel(harness, "high");
+        setLevel(harness, "off");
+        // The user turned the level back on before sending anything, so the next
+        // turn is armed and gets the level's own banner instead.
+        setLevel(harness, "ultra");
+        const preStep = harness.listeners.get("agent/pre-step");
+        const human = humanMessage("重新开档之后的第一条");
+        const decision = await preStep(
+            { agent: harness.agent, messages: [human], turn: 1, step: 1 },
+            async () => ({ kind: "enter", messages: [human] }),
+        );
+        assert.equal(decision.messages.length, 2);
+        assert.ok(
+            decision.messages[1].content[0].text.includes("Effort: ULTRA"),
+        );
+        assert.equal(
+            decision.messages[1].content[0].text.includes("workflows mode off"),
+            false,
+            "a stale disarm notice must not ride along with the new banner",
+        );
+    },
+);
+
+test(
+    "a step that is refused keeps the notice owed for the next one",
+    { skip: !available },
+    async () => {
+        const module = await loadHostBundle(bundlePath);
+        const harness = makeContext();
+        module.apply(harness.ctx, {});
+        setLevel(harness, "high");
+        setLevel(harness, "off");
+        const preStep = harness.listeners.get("agent/pre-step");
+
+        // A step that never enters injects nothing, so it must not consume the
+        // notice: the turn that does open is the one that has to carry it.
+        const refused = humanMessage("被拒绝的一步");
+        const rejected = await preStep(
+            { agent: harness.agent, messages: [refused], turn: 1, step: 1 },
+            async () => ({ kind: "reject", messages: [refused] }),
+        );
+        assert.equal(rejected.kind, "reject");
+
+        const human = humanMessage("真正发出去的一条");
+        const decision = await preStep(
+            { agent: harness.agent, messages: [human], turn: 2, step: 1 },
+            async () => ({ kind: "enter", messages: [human] }),
+        );
+        assert.equal(decision.messages.length, 2);
+        assert.ok(
+            decision.messages[1].content[0].text.includes("workflows mode off"),
+        );
+    },
+);
+
+test(
+    "a batch with no opening message does not consume the notice",
+    { skip: !available },
+    async () => {
+        const module = await loadHostBundle(bundlePath);
+        const harness = makeContext();
+        module.apply(harness.ctx, {});
+        setLevel(harness, "high");
+        setLevel(harness, "off");
+        const preStep = harness.listeners.get("agent/pre-step");
+
+        const toolResult = toolResultMessage();
+        const step = await preStep(
+            { agent: harness.agent, messages: [toolResult], turn: 1, step: 2 },
+            async () => ({ kind: "enter", messages: [toolResult] }),
+        );
+        assert.equal(step.messages.length, 1);
+
+        const human = humanMessage("轮到真正开局的那条消息");
+        const decision = await preStep(
+            { agent: harness.agent, messages: [human], turn: 2, step: 1 },
+            async () => ({ kind: "enter", messages: [human] }),
+        );
+        assert.equal(decision.messages.length, 2);
+        assert.ok(
+            decision.messages[1].content[0].text.includes("workflows mode off"),
+        );
+    },
+);
+
+test(
+    "one opening message collects one disarm notice",
+    { skip: !available },
+    async () => {
+        const module = await loadHostBundle(bundlePath);
+        const harness = makeContext();
+        module.apply(harness.ctx, {});
+        setLevel(harness, "high");
+        setLevel(harness, "off");
+        const preStep = harness.listeners.get("agent/pre-step");
+
+        // The runtime hands an abandoned step's opening message back to the next
+        // step, so the same message reaches the waterfall twice.
+        const human = humanMessage("同一条开局消息");
+        const first = await preStep(
+            { agent: harness.agent, messages: [human], turn: 1, step: 1 },
+            async () => ({ kind: "enter", messages: [human] }),
+        );
+        assert.equal(first.messages.length, 2);
+        const again = await preStep(
+            { agent: harness.agent, messages: [human], turn: 1, step: 1 },
+            async () => ({ kind: "enter", messages: [human] }),
+        );
+        assert.equal(
+            again.messages.length,
+            1,
+            "a re-queued opening must not collect a second notice",
         );
     },
 );

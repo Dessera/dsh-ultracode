@@ -14,7 +14,7 @@ injected text directly after the message that opened it.
 
 | Level   | Instruction injected after the message that opens an armed turn                                                                           |
 | ------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
-| `off`   | Nothing is injected.                                                                                                                      |
+| `off`   | Nothing, except on the one turn after the level was switched off, which carries a notice that the mode is over.                           |
 | `high`  | The `high` block: a few parallel perspectives, then one adversarial refutation pass.                                                      |
 | `ultra` | The `ultra` block: a wide fan-out, rounds that stop only after two consecutive rounds find nothing new, and a closing completeness check. |
 
@@ -23,12 +23,19 @@ turn of a level carries the complete block; every turn after that carries a one-
 level change states the block again, because the block is exactly what differs between `high` and
 `ultra`.
 
+Turning the level off is the one transition no banner can report, because a banner is injected only
+for a turn that is armed. The turn that follows the transition therefore carries the notice built by
+`buildDisarmNotice`, which says that the mode is over and that the turn authorizes no workflow run.
+It is delivered once: the session owes it after an armed level has ended, the turn that carries it
+settles the debt, and arming the session again drops it.
+
 Three consequences of that table are worth stating plainly, because they are easy to misread.
 
 First, the level is the whole gate. The plugin does not look at how long a message is, nor does it
 judge whether the message is a task: a question, a one-word follow-up and an automatic continuation
 round are all injected like any other turn. A step whose batch opens no turn is not injected, because
-that step is only the turn's own continuation.
+that step is only the turn's own continuation. The disarm notice is gated the same way, so a step that
+opens no turn leaves the notice owed rather than spending it.
 
 Second, the words `Effort: HIGH` and `Effort: ULTRA` inside the injected text are instructions to
 the model about how to shape a workflow run. They are not the harness's reasoning-effort setting,
@@ -64,8 +71,8 @@ format, and the harness carries values between them.
 | `src/host/reducer.ts`             | The pure log fold (`applyProjectionEvent`) and the command-argument classifier (`classifyCommandArgs`).                                                          |
 | `src/host/projection.ts`          | Builds the projection unit definition that is handed to the registry.                                                                                            |
 | `src/host/contract.ts`            | Type-only module. Registers the `ultracode` key in the registry's two merge tables and pulls the host packages' context merges into the program.                 |
-| `src/host/state.ts`               | The per-session memory mirror (`UltracodeStateStore`).                                                                                                           |
-| `src/host/prompt.ts`              | Assembly of the banner text, the per-level instruction blocks, and the one-line reminder a repeat turn carries.                                                  |
+| `src/host/state.ts`               | The per-session memory mirror (`UltracodeStateStore`), including the one-shot debt the disarm notice is paid from.                                               |
+| `src/host/prompt.ts`              | Assembly of the banner text, the per-level instruction blocks, the one-line reminder a repeat turn carries, and the notice a disarmed turn carries.              |
 | `src/host/message.ts`             | Construction of the one frozen message the plugin injects.                                                                                                       |
 | `src/host/notices.ts`             | Every user-facing string the host prints, in Chinese and English.                                                                                                |
 | `src/client/index.ts`             | Client entry point. Registers the dictionaries and the composer control slot.                                                                                    |
@@ -116,8 +123,8 @@ Injection happens only when every one of these holds:
 
 - the waterfall decided to enter the step,
 - the session is top-level, meaning it is neither a subagent session nor a delegated child,
-- the mirror reports a level other than `off`,
-- the configured workflow tool resolves in that session's tool scope,
+- the mirror reports a level other than `off`, or the session still owes a disarm notice,
+- for an armed turn, the configured workflow tool resolves in that session's tool scope,
 - the batch contains an opening message that has not been injected for yet.
 
 The **opening message** is the last message in the batch the inbox handed to this step that does not
@@ -140,10 +147,31 @@ Both forms carry a source summary written by `injectionSummary` as `ultracode <l
 turn`, which is the line the fold reads back; the summary does not distinguish the two forms,
 because the fold only cares about the level.
 
+The turn after a level is switched off carries the notice built by `buildDisarmNotice`, which is
+plain text rather than a bracketed armed block: nothing is armed, and the notice says so in its own
+first sentence. It carries no level instruction, so a model that reads it does not see `Effort: HIGH`
+or `Effort: ULTRA` in it, and its source summary is written by `disarmSummary` as `ultracode mode
+ended before this turn`. That summary deliberately names no level word at all, not even `off`: the
+fold reads a level out of a summary by looking for a level word, so a notice naming `high` or `ultra`
+would read as an arming, and one naming `off` would make a log that carries no level command fall back
+to `off` instead of leaving the level an earlier banner established alone.
+
+The notice is owed by the transition and paid once. `UltracodeStateStore.select` records the debt when
+a level other than `off` becomes `off`, the turn that actually injects the notice clears it, and any
+step that resolves its reasons to skip before injecting — a refused step, a batch with no opening
+message, an anchor the batch does not contain — leaves it owed. Arming the session again drops it,
+because a session that is armed once more is served by the new level's banner, and injecting a stale
+account of the level that ended beside it would contradict that banner. A re-queued opening message
+collects the notice once, which the claim keeps idempotent by anchoring it the same way the banner is
+anchored. Like the announced level, the debt lives in host memory and not in the log: a restarted
+host recovers the level from the fold, and a transition that happened before the restart is reported
+by nothing.
+
 **One banner per turn opening** is decided by the identity of the anchoring message, not by the turn
 number. That is deliberate: a steer a person types while the agent is already working joins the
 running turn, leaving the turn number unchanged while the message is new, and it still carries a
-banner of its own.
+banner of its own. The disarm notice uses its own anchor field for the same reason, so a notice never
+makes a later banner look already delivered.
 
 ### The `/ultracode` command
 
@@ -259,7 +287,7 @@ flowchart TB
         control["control: gate, notify, write the mirror"]
         mirror["Memory mirror per session"]
         prestep["agent/pre-step"]
-        banner["Banner"]
+        banner["Banner, or the disarm notice"]
         registry["Projection registry"]
         unit["Projection unit: applyProjectionEvent"]
     end
@@ -298,11 +326,11 @@ flowchart TB
 
 | File                             | Covers                                                                                                                                                                                  |
 | -------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `test/ultracode.test.mjs`        | The level vocabulary, the state store, the two injected text forms, and the banner itself.                                                                                              |
+| `test/ultracode.test.mjs`        | The level vocabulary, the state store, the injected text forms including the disarm notice, and the banner itself.                                                                      |
 | `test/protocol.test.mjs`         | The shared vocabulary, the pure fold, the reference-reuse rule, and the projection unit definition.                                                                                     |
 | `test/host-schema.test.mjs`      | That the loader schema and the resolver agree on every default they share.                                                                                                              |
 | `test/notices.test.mjs`          | The user-facing strings of both languages.                                                                                                                                              |
-| `test/host-integration.test.mjs` | The built host bundle driven through a stubbed context: the pre-step waterfall, the command, and the projection.                                                                        |
+| `test/host-integration.test.mjs` | The built host bundle driven through a stubbed context: the pre-step waterfall, the disarm notice, the command, and the projection.                                                     |
 | `test/client-units.test.mjs`     | The client's plain modules: the chip view and the reply narrowing of the write path.                                                                                                    |
 | `test/client-bundle.test.mjs`    | The built client bundle, rendered through a stubbed module loader.                                                                                                                      |
 | `test/contract-probe.test.mjs`   | The names the plugin resolves out of the installed harness, which the compiler cannot check, and the rule that the harness type packages are fixed to exact versions in `package.json`. |
