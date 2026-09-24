@@ -74,9 +74,11 @@ jobs:
               run: |
                   set -euo pipefail
                   node scripts/compat.mjs --list --json > "$RUNNER_TEMP/plan.json"
-                  echo "matrix=$(node -p 'JSON.stringify(require(process.env.RUNNER_TEMP + "/plan.json").matrix)')" >> "$GITHUB_OUTPUT"
-                  echo "boundaries=$(node -p 'JSON.stringify(require(process.env.RUNNER_TEMP + "/plan.json").boundaries)')" >> "$GITHUB_OUTPUT"
-                  echo "pinned=$(node -p 'require(process.env.RUNNER_TEMP + "/plan.json").matrix[0]')" >> "$GITHUB_OUTPUT"
+                  {
+                      echo "matrix=$(node -p 'JSON.stringify(require(process.env.RUNNER_TEMP + "/plan.json").matrix)')"
+                      echo "boundaries=$(node -p 'JSON.stringify(require(process.env.RUNNER_TEMP + "/plan.json").boundaries)')"
+                      echo "pinned=$(node -p 'require(process.env.RUNNER_TEMP + "/plan.json").matrix[0]')"
+                  } >> "$GITHUB_OUTPUT"
 
     check:
         name: Node.js ${{ matrix.node }}
@@ -86,12 +88,6 @@ jobs:
             fail-fast: false
             matrix:
                 node: ["22.x", "24.x"]
-        env:
-            # The compatibility runner provisions a harness-shaped directory per
-            # version here, and the gate reads the oldest one.
-            DSH_COMPAT_CACHE: ${{ runner.temp }}/dsh-compat
-            DSH_HOME: ${{ runner.temp }}/dsh-compat/${{ needs.plan.outputs.pinned }}
-            DSH_EXPECT_HARNESS_VERSION: ${{ needs.plan.outputs.pinned }}
         steps:
             - uses: actions/checkout@v7
 
@@ -105,10 +101,23 @@ jobs:
             - name: Install dependencies
               run: pnpm install --frozen-lockfile
 
+            # The compatibility runner provisions a harness-shaped directory per
+            # version, and the gate reads the oldest one. These names are set here
+            # rather than in a job-level `env` block, because `runner` is one of the
+            # contexts such a block cannot read and the whole workflow is rejected
+            # before it runs when one tries.
             - name: Provision and probe the oldest supported harness
+              env:
+                  DSH_COMPAT_CACHE: ${{ runner.temp }}/dsh-compat
+                  DSH_HOME: ${{ runner.temp }}/dsh-compat/${{ needs.plan.outputs.pinned }}
+                  DSH_EXPECT_HARNESS_VERSION: ${{ needs.plan.outputs.pinned }}
               run: node scripts/compat.mjs --version "${{ needs.plan.outputs.pinned }}"
 
             - name: Run the gate
+              env:
+                  DSH_COMPAT_CACHE: ${{ runner.temp }}/dsh-compat
+                  DSH_HOME: ${{ runner.temp }}/dsh-compat/${{ needs.plan.outputs.pinned }}
+                  DSH_EXPECT_HARNESS_VERSION: ${{ needs.plan.outputs.pinned }}
               run: pnpm check
 
     compat:
@@ -119,8 +128,6 @@ jobs:
             fail-fast: false
             matrix:
                 version: ${{ fromJSON(needs.plan.outputs.matrix) }}
-        env:
-            DSH_COMPAT_CACHE: ${{ runner.temp }}/dsh-compat
         steps:
             - uses: actions/checkout@v7
 
@@ -137,6 +144,8 @@ jobs:
             # `--json` keeps stdout machine readable; the human table lands in the
             # job summary, where a reviewer looks for it.
             - name: Run the suite against this harness
+              env:
+                  DSH_COMPAT_CACHE: ${{ runner.temp }}/dsh-compat
               run: node scripts/compat.mjs --version "${{ matrix.version }}" --json
 
     types:
@@ -147,8 +156,6 @@ jobs:
             fail-fast: false
             matrix:
                 version: ${{ fromJSON(needs.plan.outputs.boundaries) }}
-        env:
-            DSH_COMPAT_CACHE: ${{ runner.temp }}/dsh-compat
         steps:
             - uses: actions/checkout@v7
 
@@ -163,6 +170,8 @@ jobs:
               run: pnpm install --frozen-lockfile
 
             - name: Type check against this harness
+              env:
+                  DSH_COMPAT_CACHE: ${{ runner.temp }}/dsh-compat
               run: node scripts/compat.mjs --version "${{ matrix.version }}" --type
 
     heads:
@@ -172,8 +181,6 @@ jobs:
         # The dist-tags move without this repository doing anything, so a failure
         # here is news rather than a broken build.
         continue-on-error: true
-        env:
-            DSH_COMPAT_CACHE: ${{ runner.temp }}/dsh-compat
         steps:
             - uses: actions/checkout@v7
 
@@ -188,4 +195,6 @@ jobs:
               run: pnpm install --frozen-lockfile
 
             - name: Run the suite against the next and alpha heads
+              env:
+                  DSH_COMPAT_CACHE: ${{ runner.temp }}/dsh-compat
               run: node scripts/compat.mjs --heads
