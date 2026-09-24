@@ -7,14 +7,29 @@
 # by hand.
 #
 # Pushing a `vX.Y.Z` tag runs it. It can also be started by hand with a tag as its
-# input, for two cases: writing the Release of a tag that shipped before this
-# workflow existed, and a run that publishes nothing because the tag carries a
-# version the registry already has.
+# input, for three cases: writing the Release of a tag that shipped before this
+# workflow existed, reading the registry again after a staged release was approved,
+# and a run that publishes nothing because the version is already there.
 #
-# Publishing authenticates through the trusted publisher this repository registered
-# on npm, which is why the release job asks for `id-token: write` and why the
-# repository stores no publishing token. A hand publish from a laptop carries no
-# provenance attestation, because npm issues those only to a supported workflow.
+# Publishing goes through the registry's staging queue rather than straight to the
+# registry. This workflow runs the gate, packs the tarball and stages it, and a
+# maintainer then approves that stage with a second factor, either on npmjs.com or
+# with `npm stage approve <stage-id>`. Direct publishing is not what this
+# repository's trusted publisher allows — a run that calls `npm publish` is refused
+# with `OIDC permission denied for this action`, because a trusted publisher
+# registered after September 2026 allows the staged action unless direct publishing
+# is switched on as well.
+#
+# Staging puts nothing in the registry index, so the run that stages a version
+# cannot read its tarball integrity back. Run this workflow once more for the same
+# tag with `publish` left false after approving it: that run publishes nothing and
+# the Release picks up the integrity line.
+#
+# The repository stores no publishing token. The run authenticates through the
+# trusted publisher registered on npm, which is why the release job asks for
+# `id-token: write`, and every publish carries a provenance attestation. A hand
+# publish from a laptop carries none, because npm issues those only to a supported
+# workflow.
 
 name: Release
 
@@ -259,8 +274,9 @@ jobs:
               working-directory: tree
               run: |
                   set -euo pipefail
-                  # `--ignore-scripts`: the gate above already ran, and publishing
-                  # would otherwise run it a second time through `prepublishOnly`.
+                  # `--ignore-scripts`: without it `npm pack` runs `prepare`, which
+                  # builds the artifacts a second time, and the gate above has
+                  # already built them. Packing is all this step needs to do.
                   pnpm build
                   npm pack --ignore-scripts
                   tgz="$(ls ./*.tgz)"
@@ -270,8 +286,9 @@ jobs:
                       echo "sha512=$sha512"
                   } >> "$GITHUB_OUTPUT"
 
-            - name: Publish the tarball
+            - name: Stage the tarball for publishing
               if: steps.decide.outputs.publish == 'true'
+              id: stage
               working-directory: tree
               env:
                   TGZ: ${{ steps.pack.outputs.path }}
@@ -285,22 +302,33 @@ jobs:
                           *) tag=latest ;;
                       esac
                   fi
-                  echo "::notice::publishing $NAME@$VERSION under the $tag dist-tag"
-                  npm publish "$TGZ" --tag "$tag"
+                  echo "::notice::staging $NAME@$VERSION under the $tag dist-tag"
+                  # The stage id is what a maintainer approves, and it is printed
+                  # rather than returned in a machine-readable field, so the whole
+                  # output goes to the summary as well as the log.
+                  npm stage publish "$TGZ" --tag "$tag" 2>&1 | tee "$RUNNER_TEMP/stage.log"
+                  {
+                      echo "### Staged for approval"
+                      echo
+                      echo '```'
+                      cat "$RUNNER_TEMP/stage.log"
+                      echo '```'
+                  } >> "$GITHUB_STEP_SUMMARY"
 
             # What the registry serves is the one fact a release note cannot
-            # restate: it is read back from the registry, and when this run
-            # published, it is also compared with the bytes that were built. A
-            # version that is not on the registry at all leaves the fact empty
-            # rather than failing the run, because a run that was not asked to
-            # publish still owes its Release.
+            # restate: it is read back from the registry. It is empty while the
+            # version is only staged, because staging does not put anything in the
+            # registry index, and the comparison therefore happens only once the
+            # version is really there: a re-run after the approval records the
+            # integrity, and a mismatch between the bytes the registry serves and
+            # the bytes this workflow built fails the run that reads them.
             - name: Read what the registry serves for this version
               id: registry
               run: |
                   set -euo pipefail
                   integrity="$(npm view "$NAME@$VERSION" dist.integrity 2>/dev/null || true)"
                   echo "integrity=$integrity" >> "$GITHUB_OUTPUT"
-                  if [ "${{ steps.decide.outputs.publish }}" = "true" ]; then
+                  if [ -n "$integrity" ] && [ "${{ steps.decide.outputs.publish }}" = "true" ]; then
                       built="sha512-${{ steps.pack.outputs.sha512 }}"
                       if [ "$integrity" != "$built" ]; then
                           echo "::error::the registry serves $integrity, but this run built $built"

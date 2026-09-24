@@ -90,10 +90,21 @@ git push --follow-tags         # the commit and its tag travel together
 
 Pushing the tag runs `.github/workflows/release.yml`, which writes both records the tag owes.
 
-- **The package on npm.** The run installs the tagged tree, runs the gate and the compatibility matrix that release claims, packs the tarball, publishes it, and then compares the bytes the registry serves with the bytes it built. A version carrying a prerelease suffix goes to the `next` dist-tag instead of `latest`. Publishing authenticates through the trusted publisher this repository registered on npm, so no publishing token is stored here, and every publish carries a provenance attestation tying the tarball to this workflow and this commit.
-- **The GitHub Release.** The run reads the supported DSH versions out of the tagged tree — `compat/versions.json` when the tag carries one, and the harness version that tree pins for a tag older than that file — reads the published tarball's integrity back from the registry, and writes the notes. `test/release-notes.test.mjs` pins what those notes say.
+- **The package on npm.** The run installs the tagged tree, runs the gate and the compatibility matrix that release claims, packs the tarball, and stages it for publishing rather than putting it in the registry straight away. A version carrying a prerelease suffix is staged under the `next` dist-tag instead of `latest`. Staging authenticates through the trusted publisher this repository registered on npm, so no publishing token is stored here, and the publish carries a provenance attestation tying the tarball to this workflow and this commit.
+- **The GitHub Release.** The run reads the supported DSH versions out of the tagged tree — `compat/versions.json` when the tag carries one, and the harness version that tree pins for a tag older than that file — reads the tarball's integrity back from the registry once the version is there, and writes the notes. `test/release-notes.test.mjs` pins what those notes say.
 
-The same workflow can also be started by hand from the Actions tab with a tag as its input, which is how a release that shipped before this workflow existed gets its Release. A run whose version is already on the registry publishes nothing.
+Approving the stage is the one step left for a person, and it takes a second factor:
+
+```sh
+npm stage list @dessera/dsh-ultracode     # the staged version and its id
+npm stage approve <stage-id>              # publishes it to the registry
+```
+
+The same approval is offered on npmjs.com, under the package's staged packages. The workflow cannot publish a version by itself: the trusted publisher registered for this repository allows the staged action only, and a run that calls `npm publish` is refused with `OIDC permission denied for this action`.
+
+Because staging puts nothing in the registry index, the run that staged a version could not read its tarball integrity back. Run the workflow once more for the same tag with `publish` left false after approving: that run stages nothing, and the Release picks up the integrity line it was missing.
+
+The same workflow can also be started by hand from the Actions tab with a tag as its input. That is how a release that shipped before this workflow existed gets its Release, and how a staged release is asked to record what the registry serves.
 
 Should a release ever have to be assembled outside this workflow, publishing by hand still works:
 

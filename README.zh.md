@@ -80,10 +80,21 @@ git push --follow-tags         # 提交与 tag 一起推上去
 
 推上这个 tag 就会运行 `.github/workflows/release.yml`，由它写出这个 tag 欠下的两份记录。
 
-- **npm 上的那个包。** 这次运行会安装被 tag 的那棵树、跑门禁与这次发布所声称的兼容性矩阵、把压缩包打出来、发布它，然后拿 registry 实际提供的内容与它自己构建出的内容逐字比对。版本号里带预发布后缀时会发到 `next` 这个 dist-tag，而不是 `latest`。发布通过本仓库在 npm 上登记的受信发布者完成认证，因此仓库里不存任何发布令牌，每次发布都带一份来源证明，把这个压缩包与这次工作流、这个提交绑定起来。
-- **GitHub 上的那个 Release。** 这次运行从被 tag 的那棵树读出受支持的 DSH 版本——这个 tag 带着 `compat/versions.json` 就用它，早于该文件的 tag 就用那棵树钉的宿主版本——再从 registry 读回已发布压缩包的 integrity，然后写出发布说明；说明里写什么由 `test/release-notes.test.mjs` 钉住。
+- **npm 上的那个包。** 这次运行会安装被 tag 的那棵树、跑门禁与这次发布所声称的兼容性矩阵、把压缩包打出来，然后把它**暂存**待发布，而不是直接写进 registry。版本号里带预发布后缀时会以 `next` 这个 dist-tag 暂存，而不是 `latest`。暂存通过本仓库在 npm 上登记的受信发布者完成认证，因此仓库里不存任何发布令牌，发布时带一份来源证明，把这个压缩包与这次工作流、这个提交绑定起来。
+- **GitHub 上的那个 Release。** 这次运行从被 tag 的那棵树读出受支持的 DSH 版本——这个 tag 带着 `compat/versions.json` 就用它，早于该文件的 tag 就用那棵树钉的宿主版本——等版本进了 registry 之后再读回它的 integrity，然后写出发布说明；说明里写什么由 `test/release-notes.test.mjs` 钉住。
 
-同一个工作流也可以从 Actions 页面手工启动、把 tag 作为输入，这条路径是给「本工作流存在之前就已经发布过的 tag」补 Release 用的。某次运行如果发现该版本已经在 registry 上，它就什么都不发布。
+批准这次暂存是留给人的唯一一步，而且需要第二因素：
+
+```sh
+npm stage list @dessera/dsh-ultracode     # 看暂存的版本与它的 stage id
+npm stage approve <stage-id>              # 把它发布到 registry
+```
+
+同样的批准也可以在 npmjs.com 上那个包的「暂存包」页面完成。工作流自己发不出去：本仓库登记的受信发布者只允许暂存这一个动作，工作流里调用 `npm publish` 会被以 `OIDC permission denied for this action` 拒绝。
+
+由于暂存不会让版本出现在 registry 索引里，暂存那次运行读不到压缩包的 integrity。批准之后再对同一个 tag 跑一次工作流、`publish` 留空即可：那次运行什么都不暂存，Release 会把缺的那行 integrity 补上。
+
+同一个工作流也可以从 Actions 页面手工启动、把 tag 作为输入。这条路径有两个用途：给「本工作流存在之前就已经发布过的 tag」补 Release，以及让一个已批准的暂存发布把 registry 实际提供的内容记下来。
 
 万一某次发布必须在这个工作流之外组装，手工发布仍然可用：
 
