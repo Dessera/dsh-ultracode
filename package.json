@@ -1,6 +1,6 @@
 {
     "name": "@dessera/dsh-ultracode",
-    "version": "0.1.1",
+    "version": "0.1.2",
     "description": "Ultracode session mode for DeepSeek Harness: a three-position composer control that arms automatic multi-agent workflow orchestration by injecting an arming banner ahead of the user's own message.",
     "author": "Dessera <dessera@qq.com> (https://github.com/Dessera)",
     "repository": {
