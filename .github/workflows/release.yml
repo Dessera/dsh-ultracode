@@ -172,7 +172,17 @@ jobs:
               with:
                   node-version: "24.x"
                   cache: pnpm
-                  cache-dependency-path: tree/pnpm-lock.yaml
+                  cache-dependency-path: |
+                      package.json
+                      tree/pnpm-lock.yaml
+
+            # The generator reads the supported versions through `compat/plan.mjs`,
+            # which imports `semver`, so a run needs this repository's dependencies
+            # even when it publishes nothing. It is installed here, in the tree the
+            # generator comes from, and `--ignore-scripts` keeps the build out of it:
+            # the artifacts this run publishes are built in `tree/` below.
+            - name: Install the dependencies the generator reads
+              run: pnpm install --ignore-scripts --frozen-lockfile
 
             - name: Decide what this run does
               id: decide
