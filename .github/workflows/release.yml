@@ -214,12 +214,19 @@ jobs:
             # only when something is about to be published. The compatibility matrix
             # is the claim the Release makes, which is why it runs here rather than
             # relying on a continuous integration run that a tag does not trigger.
+            #
+            # The harness the gate reads is provisioned in its own step, and the gate
+            # names it through that step's output. A `$GITHUB_ENV` write would not do:
+            # those variables reach the steps that follow, not the one that wrote
+            # them, so the gate would run with no `DSH_HOME` and fail on a probe that
+            # looks for a harness it cannot find.
             - name: Install the tagged tree
               if: steps.decide.outputs.publish == 'true'
               working-directory: tree
               run: pnpm install --frozen-lockfile
 
-            - name: Provision the oldest supported harness, then run the gate
+            - name: Provision the oldest supported harness
+              id: provision
               if: steps.decide.outputs.publish == 'true'
               working-directory: tree
               env:
@@ -227,13 +234,17 @@ jobs:
               run: |
                   set -euo pipefail
                   pinned="$(node -e "import('./compat/plan.mjs').then(m => process.stdout.write(m.matrixOf(m.readPlan())[0]))")"
-                  {
-                      echo "DSH_COMPAT_CACHE=$DSH_COMPAT_CACHE"
-                      echo "DSH_HOME=$DSH_COMPAT_CACHE/$pinned"
-                      echo "DSH_EXPECT_HARNESS_VERSION=$pinned"
-                  } >> "$GITHUB_ENV"
+                  echo "pinned=$pinned" >> "$GITHUB_OUTPUT"
                   node scripts/compat.mjs --version "$pinned"
-                  pnpm check
+
+            - name: Run the gate
+              if: steps.decide.outputs.publish == 'true'
+              working-directory: tree
+              env:
+                  DSH_COMPAT_CACHE: ${{ runner.temp }}/dsh-compat
+                  DSH_HOME: ${{ runner.temp }}/dsh-compat/${{ steps.provision.outputs.pinned }}
+                  DSH_EXPECT_HARNESS_VERSION: ${{ steps.provision.outputs.pinned }}
+              run: pnpm check
 
             - name: Run the compatibility matrix this release claims
               if: steps.decide.outputs.publish == 'true'
