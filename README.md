@@ -78,29 +78,32 @@ releases without failing the run.
 
 ## Release
 
-The version published to npm is the anchor a deployment resolves, and npm never lets a published version be replaced, so every release takes a new number and a tag on the commit it was built from. A release runs in this order:
+The version published to npm is the anchor a deployment resolves, and npm never lets a published version be replaced, so every release takes a new number and a tag on the commit it was built from. Only that choice is made by hand:
 
 ```sh
-pnpm check                     # lint, format check, typecheck, build, tests
+pnpm check                     # the gate the workflow runs too, before anything is tagged
 pnpm version patch             # bumps the version, commits it, tags vX.Y.Z
 git push --follow-tags         # the commit and its tag travel together
-pnpm publish                   # publishes the tree that was committed
 ```
 
-`pnpm version` accepts `patch`, `minor`, `major`, or an explicit version, and puts an annotated tag named `vX.Y.Z` on the commit it creates. `--no-git-tag-version` skips both the commit and the tag, for a release assembled by other means. `pnpm publish` refuses to run unless the working tree is clean, the checkout is on the publish branch, and it is level with its remote; that check is what keeps the tagged commit and the published tarball the same tree. The first release needs no bump, because `package.json` already carries its version: tagging that commit and publishing it is the whole release.
+`pnpm version` accepts `patch`, `minor`, `major`, or an explicit version, and puts an annotated tag named `vX.Y.Z` on the commit it creates. `--no-git-tag-version` skips both the commit and the tag, for a release assembled by other means.
 
-A prerelease goes to the `next` dist-tag rather than `latest`:
+Pushing the tag runs `.github/workflows/release.yml`, which writes both records the tag owes.
+
+- **The package on npm.** The run installs the tagged tree, runs the gate and the compatibility matrix that release claims, packs the tarball, publishes it, and then compares the bytes the registry serves with the bytes it built. A version carrying a prerelease suffix goes to the `next` dist-tag instead of `latest`. Publishing authenticates through the trusted publisher this repository registered on npm, so no publishing token is stored here, and every publish carries a provenance attestation tying the tarball to this workflow and this commit.
+- **The GitHub Release.** The run reads the supported DSH versions out of the tagged tree — `compat/versions.json` when the tag carries one, and the harness version that tree pins for a tag older than that file — reads the published tarball's integrity back from the registry, and writes the notes. `test/release-notes.test.mjs` pins what those notes say.
+
+The same workflow can also be started by hand from the Actions tab with a tag as its input, which is how a release that shipped before this workflow existed gets its Release. A run whose version is already on the registry publishes nothing.
+
+Should a release ever have to be assembled outside this workflow, publishing by hand still works:
 
 ```sh
-pnpm version prerelease --preid beta   # 0.2.0 becomes 0.2.0-beta.0
-pnpm publish --tag next
+pnpm publish
 ```
 
-Each release records the DSH version it was built and tested against, in the notes of its GitHub Release. The version that release supports is whatever `compat/versions.json` said at the tagged commit, and the DSH packages in `devDependencies` are pinned at the oldest series in it, so the compiler only accepts the API that the oldest supported host already has. Widening support is an edit to that one file plus a green `pnpm compat` run: the peer range, the continuous integration matrix and the table above all derive from it, and `test/peer-range.test.mjs` fails if the range is written by hand instead.
+`pnpm publish` refuses to run unless the working tree is clean, the checkout is on the publish branch, and it is level with its remote; that check is what keeps the tagged commit and the published tarball the same tree. A publish from a laptop carries no provenance attestation, because npm issues those only to a supported workflow.
 
-Those notes are not written by hand. `.github/workflows/release.yml` writes them, run from the Actions tab with the tag as its input: it reads the supported DSH versions out of the tagged tree — `compat/versions.json` when the tag carries one, and the harness version that tree pins for a tag older than that file — reads the published tarball's integrity back from the registry, and writes the Release. `test/release-notes.test.mjs` pins what the notes say. Run it once per tag.
-
-Publishing itself is still the hand step above. The workflow carries a publishing path of its own — it runs the gate, publishes the tarball it built, and attaches that tarball and the compatibility report to the Release — and that path is not enabled yet.
+The version a release supports is whatever `compat/versions.json` said at the tagged commit, and the DSH packages in `devDependencies` are pinned at the oldest series in it, so the compiler only accepts the API that the oldest supported host already has. Widening support is an edit to that one file plus a green `pnpm compat` run: the peer range, the continuous integration matrix and the table above all derive from it, and `test/peer-range.test.mjs` fails if the range is written by hand instead.
 
 ## Sources and acknowledgements
 

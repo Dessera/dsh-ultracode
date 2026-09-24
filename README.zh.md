@@ -68,29 +68,32 @@ pnpm compat     # runs the suite against every supported DSH version
 
 ## 发布
 
-发布到 npm 的版本号是部署端解析的锚点。npm 上的版本一经发布就不能被替换，所以每次发布都要用一个新版本号，并在它所对应的那个提交上打一个 tag。一次发布按下面的顺序进行：
+发布到 npm 的版本号是部署端解析的锚点。npm 上的版本一经发布就不能被替换，所以每次发布都要用一个新版本号，并在它所对应的那个提交上打一个 tag。需要人拍板的只有这个决定：
 
 ```sh
-pnpm check                     # lint、格式检查、类型检查、构建、测试
+pnpm check                     # 工作流也会跑这道门禁，打 tag 之前先跑一遍
 pnpm version patch             # 升版本号、生成提交、打 vX.Y.Z 注解 tag
 git push --follow-tags         # 提交与 tag 一起推上去
-pnpm publish                   # 发布的就是已提交的那棵树
 ```
 
-`pnpm version` 接受 `patch`、`minor`、`major`，也可以直接给一个版本号；它会在自己生成的提交上打一个名为 `vX.Y.Z` 的注解 tag。如果发布流程由别的工具组装，用 `--no-git-tag-version` 把自动提交与自动打 tag 都关掉。`pnpm publish` 要求工作区干净、当前分支是发布分支、并且与远程同步，否则会直接拒绝执行；这条检查保证被 tag 的提交与发布出去的压缩包是同一棵树。首次发布不需要升版本号，因为 `package.json` 里已经写好了版本号：给那个提交打上 tag 再发布，这一次发布就完成了。
+`pnpm version` 接受 `patch`、`minor`、`major`，也可以直接给一个版本号；它会在自己生成的提交上打一个名为 `vX.Y.Z` 的注解 tag。如果这次发布由别的工具组装，用 `--no-git-tag-version` 把自动提交与自动打 tag 都关掉。
 
-预发布版本发布到 `next` 这个 dist-tag，而不是 `latest`：
+推上这个 tag 就会运行 `.github/workflows/release.yml`，由它写出这个 tag 欠下的两份记录。
+
+- **npm 上的那个包。** 这次运行会安装被 tag 的那棵树、跑门禁与这次发布所声称的兼容性矩阵、把压缩包打出来、发布它，然后拿 registry 实际提供的内容与它自己构建出的内容逐字比对。版本号里带预发布后缀时会发到 `next` 这个 dist-tag，而不是 `latest`。发布通过本仓库在 npm 上登记的受信发布者完成认证，因此仓库里不存任何发布令牌，每次发布都带一份来源证明，把这个压缩包与这次工作流、这个提交绑定起来。
+- **GitHub 上的那个 Release。** 这次运行从被 tag 的那棵树读出受支持的 DSH 版本——这个 tag 带着 `compat/versions.json` 就用它，早于该文件的 tag 就用那棵树钉的宿主版本——再从 registry 读回已发布压缩包的 integrity，然后写出发布说明；说明里写什么由 `test/release-notes.test.mjs` 钉住。
+
+同一个工作流也可以从 Actions 页面手工启动、把 tag 作为输入，这条路径是给「本工作流存在之前就已经发布过的 tag」补 Release 用的。某次运行如果发现该版本已经在 registry 上，它就什么都不发布。
+
+万一某次发布必须在这个工作流之外组装，手工发布仍然可用：
 
 ```sh
-pnpm version prerelease --preid beta   # 0.2.0 变成 0.2.0-beta.0
-pnpm publish --tag next
+pnpm publish
 ```
 
-每次发布都在对应的 GitHub Release 说明里记下它是针对哪一版 DSH 构建和测试的。那次发布支持的版本，就是打 tag 那个提交上的 `compat/versions.json` 所写的内容；`devDependencies` 里的 DSH 包钉在这个文件里最旧的序列上，因此编译器只接受最旧的受支持宿主已经具备的 API。放宽支持范围就是改这一个文件，再加一次跑绿的 `pnpm compat`：peer 范围、持续集成的版本矩阵与上面那张表都由它派生，而如果谁绕过它手写范围，`test/peer-range.test.mjs` 会失败。
+`pnpm publish` 要求工作区干净、当前分支是发布分支、并且与远程同步，否则会直接拒绝执行；这条检查保证被 tag 的提交与发布出去的压缩包是同一棵树。在个人机器上手工发布不带来源证明，因为 npm 只把它签发给受支持的工作流。
 
-这些说明不是手写的。写出它们的是 `.github/workflows/release.yml`，从 Actions 页面运行，把 tag 作为输入：它从被 tag 的那棵树里读出受支持的 DSH 版本——这个 tag 带着 `compat/versions.json` 就用它，早于该文件的 tag 就用那棵树钉的宿主版本——再从 registry 读回已发布压缩包的 integrity，然后写出这次 Release。说明里写什么由 `test/release-notes.test.mjs` 钉住。每个 tag 运行一次。
-
-发布这一步目前仍由上面那几条命令手工完成。工作流里也带了一条发布路径——它会跑门禁、发布自己构建出的压缩包，并把该压缩包与兼容性报告附到 Release 上——这条路径尚未启用。
+那次发布支持的版本，就是打 tag 那个提交上的 `compat/versions.json` 所写的内容；`devDependencies` 里的 DSH 包钉在这个文件里最旧的序列上，因此编译器只接受最旧的受支持宿主已经具备的 API。放宽支持范围就是改这一个文件，再加一次跑绿的 `pnpm compat`：peer 范围、持续集成的版本矩阵与上面那张表都由它派生，而如果谁绕过它手写范围，`test/peer-range.test.mjs` 会失败。
 
 ## 来源与致谢
 

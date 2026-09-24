@@ -6,26 +6,23 @@
 # what that package was built and tested against — so that neither one is written
 # by hand.
 #
-# It runs by hand today, and its `publish` input defaults to false. That is the
-# first of three stages, and the order matters:
+# Pushing a `vX.Y.Z` tag runs it. It can also be started by hand with a tag as its
+# input, for two cases: writing the Release of a tag that shipped before this
+# workflow existed, and a run that publishes nothing because the tag carries a
+# version the registry already has.
 #
-#   1. A run with `publish` left false only writes the Release. That is how the
-#      releases that shipped before this workflow existed get the record they never
-#      had, and it touches npm in no way at all.
-#   2. A run with `publish: true` against a version that is already on the registry
-#      exercises the publishing path end to end while publishing nothing: the run
-#      notices the version is published and skips the publish step.
-#   3. Real publishing needs the tag trigger, the `id-token: write` permission and
-#      the trusted publisher registered on npm. All three arrive together, because
-#      a tag that fires a publish nobody registered would only fail.
-#
-# Until then a version that is not on the registry, with `publish: true`, fails at
-# the publish step with an authentication error. Nothing is written on that path,
-# so the failure is loud and harmless.
+# Publishing authenticates through the trusted publisher this repository registered
+# on npm, which is why the release job asks for `id-token: write` and why the
+# repository stores no publishing token. A hand publish from a laptop carries no
+# provenance attestation, because npm issues those only to a supported workflow.
 
 name: Release
 
 on:
+    push:
+        # Release tags only. A push to a branch is what the continuous integration
+        # workflow answers.
+        tags: ["v*.*.*"]
     workflow_dispatch:
         inputs:
             tag:
@@ -48,9 +45,12 @@ on:
 permissions:
     contents: read
 
-# A release is never cancelled halfway through, so this group never cancels.
+# A release is never cancelled halfway through, so this group never cancels. The
+# group is named after the tag from either trigger, so two runs for the same tag
+# queue behind each other instead of racing, and two runs for different tags do not
+# block each other.
 concurrency:
-    group: release-${{ inputs.tag }}
+    group: release-${{ inputs.tag || github.ref_name }}
     cancel-in-progress: false
 
 jobs:
@@ -72,6 +72,13 @@ jobs:
                   # the history and the tags, which a shallow checkout does not carry.
                   fetch-depth: 0
 
+            # The plan reads two other release tags — the one before this release,
+            # for the compare link, and the newest one, which decides the Latest
+            # flag. The checkout provides them today, but nothing here should depend
+            # on an action's default: fetching them keeps the requirement explicit.
+            - name: Fetch the release tags
+              run: git fetch --tags --force --quiet
+
             - uses: actions/setup-node@v7
               with:
                   node-version: "24.x"
@@ -86,7 +93,9 @@ jobs:
             - name: Verify the tag, and read what the registry already has
               id: verify
               env:
-                  TAG: ${{ inputs.tag }}
+                  # The tag comes from the pushed ref on a tag push, and from the
+                  # input on a manual run.
+                  TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
                   TAGGED: ${{ runner.temp }}/tagged-package.json
               run: |
                   set -euo pipefail
@@ -143,11 +152,11 @@ jobs:
         needs: plan
         runs-on: ubuntu-latest
         permissions:
-            # Creating the Release and uploading its assets is the only write this
-            # job performs. `id-token: write` belongs here too, and arrives with the
-            # tag trigger: it is the permission the registry exchanges for a
-            # publishing token, so nothing needs it until publishing is live.
+            # Creating the Release and uploading its assets is one write. The other
+            # is the OIDC token the registry exchanges for a short-lived publishing
+            # token, which is what lets a publish carry its provenance attestation.
             contents: write
+            id-token: write
         env:
             TAG: ${{ needs.plan.outputs.tag }}
             NAME: ${{ needs.plan.outputs.name }}
