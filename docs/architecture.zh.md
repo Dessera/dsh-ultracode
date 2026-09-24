@@ -205,6 +205,7 @@ flowchart TB
 - 客户端产物是一个包在模块加载器握手里的 CJS bundle。它声明的外部依赖是 `react`、`react-dom` 与 JSX 运行时，因为浏览器平台模块表能应答它们，而内联第二份 React 会破坏 hooks；构建出来的产物最终只 require React 与 JSX 运行时。其余全部打包进去。
 - `prepare` 脚本会跑构建，因此一次 Git 安装就能产出两个产物。
 - `pnpm check` 按这个顺序跑 lint、类型检查、构建与测试。打包测试断言的对象是 `lib/client.js`，所以客户端部分必须在跑这些测试之前构建好。
+- `pnpm compat` 把同一套测试对着每一个受支持的 DSH 版本各跑一遍。
 
 ## 测试
 
@@ -213,13 +214,14 @@ flowchart TB
 | `test/ultracode.test.mjs`        | 档位词汇、状态存储、注入的各种文本形态（含关闭提示），以及开启提示本身。                                                           |
 | `test/protocol.test.mjs`         | 共享词汇、纯折叠、引用复用规则，以及投影单元定义。                                                                                 |
 | `test/host-schema.test.mjs`      | loader schema 与解析器在它们共享的每一个默认值上一致。                                                                             |
+| `test/peer-range.test.mjs`       | 声明的范围就是 `compat/versions.json` 生成的那个范围，以及两者列出的宿主包相同。                                                   |
 | `test/notices.test.mjs`          | 两种语言里面向用户的字符串。                                                                                                       |
 | `test/host-integration.test.mjs` | 构建出的宿主 bundle 在一个打桩上下文里被驱动：pre-step 瀑布、关闭提示、命令与投影。                                                |
 | `test/client-units.test.mjs`     | 客户端那些普通模块：chip 视图与写入路径的回复收窄。                                                                                |
 | `test/client-bundle.test.mjs`    | 构建出的客户端 bundle，通过一个打桩的模块加载器渲染。                                                                              |
 | `test/contract-probe.test.mjs`   | 插件从已安装 harness 里解析出来的那些名字（编译器无法检查它们），以及 harness 类型包在 `package.json` 里被固定到确切版本这条规则。 |
 
-有两处守卫是有意为之。当找不到任何可达的 harness 安装时，契约探针会大声失败，因为一个悄悄什么都没检查的测试套件，比一个红的套件更糟；持续集成那一趟会装好一份 harness 安装，好让这个守卫有东西可读。宿主 bundle 加载器会拒绝任何按包名导入的产物，因为这样的产物会加载读代码的人所解析到的任意一份 harness，而不是该 profile 实际运行的那一份；那个加载器是 `test/support/` 下的共享辅助件，而不是一个独立的套件，行使该拒绝的测试放在 `test/host-integration.test.mjs` 里。
+有两处守卫是有意为之。当找不到任何可达的 harness 安装时，契约探针会大声失败，因为一个悄悄什么都没检查的测试套件，比一个红的套件更糟；持续集成那一趟会装好一份 harness 安装，好让这个守卫有东西可读。宿主 bundle 加载器会拒绝任何按包名导入的产物，因为这样的产物会加载读代码的人所解析到的任意一份 harness，而不是该 profile 实际运行的那一份；那个加载器是 `test/support/` 下的共享辅助件，而不是一个独立的套件，行使该拒绝的测试放在 `test/host-integration.test.mjs` 里。探针要断言的那些名字都列在 `test/support/harness-contract.mjs` 里，同时也列着这些名字分别从哪个包读取。
 
 ## 有意的边界
 

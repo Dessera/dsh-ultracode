@@ -321,6 +321,7 @@ flowchart TB
 - The `prepare` script runs the build, so a Git install produces both artifacts.
 - `pnpm check` runs lint, typecheck, build and tests in that order. The bundle tests assert against
   `lib/client.js`, so the client part must be built before those tests run.
+- `pnpm compat` runs the same test suite against each supported DSH version.
 
 ## Tests
 
@@ -329,6 +330,7 @@ flowchart TB
 | `test/ultracode.test.mjs`        | The level vocabulary, the state store, the injected text forms including the disarm notice, and the banner itself.                                                                      |
 | `test/protocol.test.mjs`         | The shared vocabulary, the pure fold, the reference-reuse rule, and the projection unit definition.                                                                                     |
 | `test/host-schema.test.mjs`      | That the loader schema and the resolver agree on every default they share.                                                                                                              |
+| `test/peer-range.test.mjs`       | That the declared range is the one `compat/versions.json` generates, and that both name the same harness packages.                                                                      |
 | `test/notices.test.mjs`          | The user-facing strings of both languages.                                                                                                                                              |
 | `test/host-integration.test.mjs` | The built host bundle driven through a stubbed context: the pre-step waterfall, the disarm notice, the command, and the projection.                                                     |
 | `test/client-units.test.mjs`     | The client's plain modules: the chip view and the reply narrowing of the write path.                                                                                                    |
@@ -341,7 +343,8 @@ integration job installs one so that the guard has something to read. The host b
 an artifact that imports a package by name, because such an artifact would load whichever copy of the
 harness the reader resolves rather than the one the profile runs; that loader is a shared helper under
 `test/support/` rather than a suite of its own, and the test that exercises the refusal lives in
-`test/host-integration.test.mjs`.
+`test/host-integration.test.mjs`. The names the probe asserts are listed in
+`test/support/harness-contract.mjs`, together with the packages those names are read from.
 
 ## Deliberate limits
 

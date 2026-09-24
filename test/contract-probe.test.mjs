@@ -13,6 +13,9 @@
  *
  * It reads the harness that is actually installed on this machine and asserts
  * that every one of those names still exists under the name the plugin uses.
+ * The surfaces themselves live in `./support/harness-contract.mjs`, because the
+ * compatibility runner installs one harness per supported version and needs the
+ * same list to provision one.
  *
  * Each probe skips itself when no harness installation is reachable, so a
  * checkout that has only this plugin reports the checks it cannot run as skips
@@ -20,190 +23,69 @@
  * guard before them: it reads no harness file, it asserts that an installation is
  * reachable, and it is therefore what turns a missing harness into a visible
  * failure instead of a green run that checked nothing.
+ *
+ * One test reports which harness answered. A compatibility run also names the
+ * version it provisioned through `DSH_EXPECT_HARNESS_VERSION`, and that test
+ * then refuses a run whose resolution landed somewhere else.
  */
 import assert from "node:assert/strict";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
-import { findPackage, harnessRoots } from "./support/host-loader.mjs";
+import {
+    CLIENT_NAMES,
+    HOST_SERVICES,
+    LOG_EVENTS,
+    SENTINEL,
+    SESSION_ACCESSORS,
+} from "./support/harness-contract.mjs";
+import {
+    findPackage,
+    findPackageWithin,
+    harnessRoots,
+} from "./support/host-loader.mjs";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
-
-/** The harness package the probe uses to decide whether a harness is present. */
-const SENTINEL = "@deepseek-ai/dsh-tools";
 
 /** Whether a harness installation is reachable from this checkout. */
 const available = findPackage(SENTINEL) !== undefined;
 
-/**
- * Fail loudly when the harness is missing.
- *
- * Every assertion below is meaningless without an installation to read, and a
- * skipped test exits zero. This guard is what turns "could not check" into a
- * visible failure instead of a green suite.
- */
-test("a harness installation is reachable, because every probe below reads one", () => {
-    assert.ok(
-        available,
-        `no harness installation is reachable: ${SENTINEL} could not be resolved.\n` +
-            "Install or link a DSH profile, or set DSH_HOME, before running this suite.",
-    );
-});
+/** The version of the harness this run read, when one is reachable. */
+const harnessVersion = readHarnessVersion(SENTINEL);
+
+/** The version a compatibility run provisioned, when it named one. */
+const expectedVersion = process.env.DSH_EXPECT_HARNESS_VERSION ?? "";
 
 /**
- * One host service the plugin resolves by name.
+ * The `node_modules` directories Node itself would consult, nearest first.
  *
- * A service is registered by its class constructor calling `super(ctx, '<name>')`,
- * so that call is the marker.
+ * A package is found the way a bare specifier would be: by walking up from the
+ * anchor. The asset-only browser shell has no entry point to resolve, so this
+ * walk is the only thing that finds it, and it finds the copy the profile runs
+ * rather than a sibling installation.
+ * @param start - absolute directory to start from.
+ * @returns the candidate package directories, nearest first.
  */
-const HOST_SERVICES = [
-    {
-        key: "tools",
-        provider: "@deepseek-ai/dsh-tools",
-        entry: "lib/index.js",
-        marker: 'super(ctx, "tools")',
-    },
-    {
-        key: "commands",
-        provider: "@deepseek-ai/dsh-commands",
-        entry: "lib/index.js",
-        marker: 'super(ctx, "commands")',
-    },
-    {
-        key: "sessionProjections",
-        provider: "@deepseek-ai/dsh-session-projection",
-        entry: "lib/index.js",
-        marker: 'super(ctx, "sessionProjections")',
-    },
-];
-
-/**
- * One client-side name the browser half binds to.
- *
- * What remains here is what the compiler does not cover. The seat key, the
- * standard props and the projection tables are all imported types now, so a
- * rename of those fails the build. These entries are the rest: runtime names
- * whose definitions live in the packages that publish them — the seat the
- * composer creates, the slot service the renderer provides, the locale runtime
- * the locale package creates, and the `slots`, `locale`, `remote` and
- * `remote.commands` services the client's inject list is answered by — plus the
- * runtime shape the composer gives that seat, and
- * the one derivation rule the value depends on: the prop name a projection key
- * turns into is computed at runtime, so a change to that rule is invisible to the
- * type system.
- */
-const CLIENT_NAMES = [
-    {
-        what: "the keyed hook map the seat receives, from which the projection hooks derive",
-        provider: "@deepseek-ai/dsh-client-ui-session",
-        entry: "lib/client.js",
-        marker: 'keyedHooks: ["projection"]',
-    },
-    {
-        what: "the seat registration in the composer, at its runtime shape",
-        provider: "@deepseek-ai/dsh-client-ui-conversation",
-        entry: "lib/client.js",
-        marker: '"conversation.input.right":',
-    },
-    {
-        what: "the kind and scope of that seat",
-        provider: "@deepseek-ai/dsh-client-ui-conversation",
-        entry: "lib/client.js",
-        marker: '"conversation.input.right": {\n\t\t\t\t\t\tkind: "list",\n\t\t\t\t\t\tscope: "session"',
-    },
-    {
-        what: 'the browser seed word that answers require("@deepseek-ai/dsh-client-ui-slots")',
-        provider: "@deepseek-ai/dsh-web-frontend",
-        entry: "dist/assets/index-*.js",
-        marker: '"@deepseek-ai/dsh-client-ui-slots":',
-    },
-    {
-        what: "the runtime derivation from a projection key to its hook prop name",
-        provider: "@deepseek-ai/dsh-web-frontend",
-        entry: "dist/assets/index-*.js",
-        marker: "standardHookPropName",
-    },
-    {
-        what: "the locale registry the plugin registers its dictionaries through",
-        provider: "@deepseek-ai/dsh-client-locale",
-        entry: "lib/client.js",
-        marker: "new LocaleRuntime(ctx",
-    },
-    {
-        what: "the command channel the write path calls",
-        provider: "@deepseek-ai/dsh-api-gateway",
-        entry: "lib/client.js",
-        marker: "remote.<namespace>",
-    },
-    {
-        what: "the seed module that provides the slots service the client injects",
-        provider: "@deepseek-ai/dsh-client-ui-renderer",
-        entry: "lib/client.js",
-        marker: 'super(ctx, "slots")',
-    },
-    {
-        what: "the seed module that provides the locale service the client injects",
-        provider: "@deepseek-ai/dsh-client-locale",
-        entry: "lib/client.js",
-        marker: 'ctx.provide("locale", locale)',
-    },
-    {
-        what: "the seed module that provides the remote service the client injects",
-        provider: "@deepseek-ai/dsh-api-gateway",
-        entry: "lib/client.js",
-        marker: 'super(ctx, "remote")',
-    },
-    {
-        what: "the remote namespace the injected remote.commands service is composed from",
-        provider: "@deepseek-ai/dsh-commands",
-        entry: "lib/typert.remote-client.js",
-        marker: "namespace: 'commands'",
-    },
-];
-
-/**
- * One session log event the fold branches on.
- *
- * These are durable event names the plugin reads rather than services it calls,
- * so a rename would silently stop the fold from recognising a level change.
- */
-const LOG_EVENTS = [
-    {
-        name: "command/run",
-        provider: "@deepseek-ai/dsh-commands",
-        entry: "lib/index.js",
-    },
-    {
-        name: "command/done",
-        provider: "@deepseek-ai/dsh-commands",
-        entry: "lib/index.js",
-    },
-    {
-        name: "user/message",
-        provider: "@deepseek-ai/dsh-agent-loop",
-        entry: "lib/index.js",
-    },
-];
-
-/** One session accessor the host half reads from a live agent. */
-const SESSION_ACCESSORS = [
-    {
-        what: "the immutable session header the plugin reads for delegation depth",
-        provider: "@deepseek-ai/dsh-session",
-        entry: "lib/types/types.d.ts",
-        marker: "interface SessionHeader",
-    },
-];
+function nodeModulesDirs(start) {
+    const dirs = [];
+    let dir = resolve(start);
+    for (;;) {
+        dirs.push(join(dir, "node_modules"));
+        const parent = dirname(dir);
+        if (parent === dir) return dirs;
+        dir = parent;
+    }
+}
 
 /**
  * Locate one harness package's directory.
  *
  * `findPackage` resolves a package through its entry point, which an asset-only
  * package such as the browser shell does not have: its manifest exposes only
- * `./dist/*`. This searches the harness roots for the directory instead, so a
- * package with no entry point is still readable.
+ * `./dist/*`. This searches the directories a resolution would search instead,
+ * so a package with no entry point is still readable.
  * @param provider - the package specifier to locate.
  * @returns the package directory, or undefined when it is absent.
  */
@@ -216,20 +98,32 @@ function findHarnessDir(provider) {
         return dir;
     }
     for (const anchor of harnessRoots()) {
-        // Three shapes are worth trying: the root itself, the root's scoped folder,
-        // and the installed harness's own dependency tree, which is where the packages
-        // the running host loads actually live.
-        const candidates = [
-            join(anchor, provider),
-            join(anchor, provider, "node_modules"),
-        ];
-        const installed = join(anchor, "@deepseek-ai", "dsh", "node_modules");
-        if (existsSync(installed)) candidates.push(join(installed, provider));
-        for (const candidate of candidates) {
+        for (const modules of nodeModulesDirs(anchor)) {
+            const candidate = join(modules, provider);
             if (existsSync(join(candidate, "package.json"))) return candidate;
         }
     }
     return undefined;
+}
+
+/**
+ * Read one harness package's version.
+ * @param provider - the package specifier to read.
+ * @returns the version it declares, or undefined when it cannot be read.
+ */
+function readHarnessVersion(provider) {
+    const dir = findHarnessDir(provider);
+    if (dir === undefined) return undefined;
+    try {
+        const manifest = JSON.parse(
+            readFileSync(join(dir, "package.json"), "utf8"),
+        );
+        return typeof manifest.version === "string"
+            ? manifest.version
+            : undefined;
+    } catch {
+        return undefined;
+    }
 }
 
 /**
@@ -290,6 +184,49 @@ function checkMarkers(surfaces, describe) {
     }
     return missing;
 }
+
+/**
+ * Fail loudly when the harness is missing.
+ *
+ * Every assertion below is meaningless without an installation to read, and a
+ * skipped test exits zero. This guard is what turns "could not check" into a
+ * visible failure instead of a green suite.
+ */
+test("a harness installation is reachable, because every probe below reads one", () => {
+    assert.ok(
+        available,
+        `no harness installation is reachable: ${SENTINEL} could not be resolved.\n` +
+            "Install or link a DSH profile, or set DSH_HOME, before running this suite.",
+    );
+});
+
+/**
+ * Say which harness answered, and hold a compatibility run to the one it provisioned.
+ *
+ * The version this reads sits in the title, so a run's log states the harness it
+ * checked even when every probe passes. A run that names an expected version is
+ * additionally held to it: a resolution that walked up into another installation
+ * would otherwise report a green suite for a harness nobody asked about.
+ */
+test(
+    `the harness under test is ${SENTINEL}@${harnessVersion ?? "unreadable"}`,
+    { skip: !available },
+    (t) => {
+        const entry = findPackage(SENTINEL);
+        t.diagnostic(`resolved from ${entry}`);
+        if (expectedVersion === "") return;
+        assert.equal(
+            harnessVersion,
+            expectedVersion,
+            `this run provisioned ${SENTINEL}@${expectedVersion} but read @${harnessVersion} from ${entry}`,
+        );
+        try {
+            findPackageWithin(SENTINEL, harnessRoots()[0]);
+        } catch (error) {
+            assert.fail(error instanceof Error ? error.message : String(error));
+        }
+    },
+);
 
 test(
     "every host service the plugin resolves by name is still registered under that name",

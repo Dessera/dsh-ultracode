@@ -2,3 +2,6 @@ node_modules/
 lib/
 *.log
 .DS_Store
+
+# Written by `pnpm compat --update`: a record of one run, not a source file.
+compat/matrix.json

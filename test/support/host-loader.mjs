@@ -13,12 +13,13 @@
  * names the specifier instead of letting the suite test a different copy of the
  * code.
  *
- * `findPackage` and `harnessRoots` stay exported because the contract probe uses
- * them to read the harness that is installed on this machine.
+ * `findPackage`, `findPackageWithin` and `harnessRoots` stay exported because the
+ * contract probe and the compatibility runner use them to read, and to refuse a
+ * harness other than, the one this machine or a matrix leg installed.
  */
 import { createRequire } from "node:module";
 import { readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 /** Candidate roots that may hold an installed harness. */
@@ -26,10 +27,12 @@ export function harnessRoots() {
     const home =
         process.env.DSH_HOME ??
         join(process.env.USERPROFILE ?? process.env.HOME ?? "", ".dsh");
-    const roots = [join(home, "profiles", "web")];
-    if (process.env.APPDATA !== undefined)
-        roots.push(join(process.env.APPDATA, "npm", "node_modules"));
-    return roots;
+    // The profile is the only root. An ambient global installation used to be
+    // appended here, and it never resolved anything the profile did not: the
+    // packages the running host loads sit in the profile's own dependency tree.
+    // Keeping it would mean a run could report on a harness the caller never
+    // asked for, which is exactly the drift a compatibility run must not have.
+    return [join(home, "profiles", "web")];
 }
 
 /**
@@ -46,6 +49,32 @@ export function findPackage(name) {
         }
     }
     return undefined;
+}
+
+/**
+ * Locate one harness package and refuse a result that sits outside a root.
+ *
+ * Node resolves a bare specifier by walking up from the anchor, so a successful
+ * resolution says nothing about which installation answered it. A run that names
+ * one harness has to know it read that harness: this is the check that turns
+ * "resolved somehow" into "resolved from here".
+ * @param name - the package specifier to resolve.
+ * @param within - absolute directory the resolved path must sit under.
+ * @returns the absolute entry path.
+ * @throws when the package is missing or resolves outside `within`.
+ */
+export function findPackageWithin(name, within) {
+    const resolved = findPackage(name);
+    if (resolved === undefined)
+        throw new Error(
+            `${name} is not installed under ${within}; provision this harness before reading it`,
+        );
+    const walk = relative(resolve(within), resolved);
+    if (walk.startsWith("..") || isAbsolute(walk))
+        throw new Error(
+            `${name} resolved to ${resolved}, which is outside ${within}; the run would have read a different installation`,
+        );
+    return resolved;
 }
 
 /** Absolute path of the package root. */

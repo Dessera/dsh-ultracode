@@ -8,3 +8,7 @@ pnpm-lock.yaml
 # Build output. Ignored through .gitignore today, stated here so that removing
 # `lib/` from there does not quietly put generated bundles under the formatter.
 lib/
+
+# A run artifact of `pnpm compat --update`. Its shape is the runner's, so the
+# formatter has no business rewriting it.
+compat/matrix.json

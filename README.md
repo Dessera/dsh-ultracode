@@ -15,6 +15,20 @@ Ultracode session mode for DeepSeek Harness (DSH). It adds a three-position cont
 How the plugin is put together — the two parts, the state model, the command set, and the format the two
 sides exchange — is described in [docs/architecture.md](docs/architecture.md).
 
+## Supported DSH versions
+
+The package declares the DSH versions it supports in `peerDependencies`, and a
+host refuses to load it on a version outside that range.
+
+| Series        | Verified versions                | Notes                                                                               |
+| ------------- | -------------------------------- | ----------------------------------------------------------------------------------- |
+| `0.1.5-rc`    | `0.1.5-rc.3`                     | The oldest supported series, and the one the type references are pinned to.         |
+| `0.1.6-alpha` | `0.1.6-alpha.1`, `0.1.6-alpha.2` | Every published version of the series; its host does not read the peer requirement. |
+| `0.1.7-rc`    | `0.1.7-rc.2`                     | The first series whose host enforces the peer requirement.                          |
+
+[docs/compatibility.md](docs/compatibility.md) explains what the declaration means
+for each series, and describes how to add support for another version.
+
 ## Install
 
 DSH installs the plugin from npm:
@@ -44,13 +58,23 @@ pnpm install    # installs dependencies and builds, because the prepare script r
 pnpm build      # rebuilds after a source change
 pnpm format     # rewrites the files Prettier reports
 pnpm check      # the full gate: formatting, lint, typecheck, build, tests
+pnpm compat     # runs the suite against every supported DSH version
 ```
+
+`pnpm compat` installs a copy of each supported DSH version and runs the test
+suite against that copy, so no version has to be installed by hand.
 
 The build writes two artifacts: `lib/index.js` is the host part, which runs in Node inside DSH, and `lib/client.js` is the browser part, which DSH loads into its web client. `pnpm test` runs the suites on their own, and the bundle tests assert against the built `lib/client.js`, so build before testing a change to the client part.
 
 ## Continuous integration
 
-Every push to `main` and every pull request runs `.github/workflows/ci.yml`, which executes `pnpm check` on Node.js 22.x and 24.x. That run installs the harness `test/contract-probe.test.mjs` asserts against, at the versions this repository pins, because a runner has no DSH installation of its own.
+Every push to `main` and every pull request runs `.github/workflows/ci.yml`. The
+workflow reads the supported versions from `compat/versions.json`, so no job
+restates a version number. The gate runs `pnpm check` on Node.js 22.x and 24.x
+against the oldest supported version, the compatibility jobs run the test suite
+once for each supported version, the type check runs against the oldest and the
+newest supported versions, and one job per day follows the `next` and `alpha`
+releases without failing the run.
 
 ## Release
 
@@ -72,7 +96,7 @@ pnpm version prerelease --preid beta   # 0.2.0 becomes 0.2.0-beta.0
 pnpm publish --tag next
 ```
 
-Each release records the DSH version it was built and tested against, in the notes of its GitHub Release. The DSH packages in `devDependencies` are fixed at `0.1.6-alpha.2`, and that series still carries an alpha suffix, so a release names the exact version instead of a range: a newer DSH stays unverified until the suites have run against it.
+Each release records the DSH version it was built and tested against, in the notes of its GitHub Release. The version that release supports is whatever `compat/versions.json` said at the tagged commit, and the DSH packages in `devDependencies` are pinned at the oldest series in it, so the compiler only accepts the API that the oldest supported host already has. Widening support is an edit to that one file plus a green `pnpm compat` run: the peer range, the continuous integration matrix and the table above all derive from it, and `test/peer-range.test.mjs` fails if the range is written by hand instead.
 
 ## Sources and acknowledgements
 

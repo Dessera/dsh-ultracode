@@ -37,9 +37,16 @@ import type {
  * package is what declares the seat this plugin registers into; the session
  * package is what merges the session identity, the session hook and the
  * projection hook into every session-scoped seat's props; the locale package is
- * what provides `ctx.locale`; and the commands remote entry is what merges the
- * command executor onto `ctx.remote`.
+ * what provides `ctx.locale`; the commands remote entry is what merges the
+ * command executor onto `ctx.remote`; and the gateway client entry is what
+ * declares `ctx.remote` itself.
+ *
+ * The gateway entry is imported even though nothing here names a type from it.
+ * That service used to arrive in the program only because another package's
+ * declarations referenced it, and the oldest supported series does not, so
+ * without this edge the write path reads a `ctx.remote` the compiler cannot see.
  */
+import type {} from "@deepseek-ai/dsh-api-gateway/client";
 import type {} from "@deepseek-ai/dsh-client-ui-renderer/client";
 import type {} from "@deepseek-ai/dsh-client-ui-session/client";
 import type {} from "@deepseek-ai/dsh-client-ui-conversation/client";

@@ -14,6 +14,18 @@ DeepSeek Harness（DSH）的 ultracode 会话模式。它在输入框（composer
 
 插件是怎么拼起来的——两半的分工、状态模型、命令集合、两侧之间的通信格式——写在 [docs/architecture.zh.md](docs/architecture.zh.md) 里（英文原件为 [docs/architecture.md](docs/architecture.md)）。
 
+## 支持的 DSH 版本
+
+本包在 `peerDependencies` 里声明自己支持哪些 DSH 版本，落在范围之外的宿主会拒绝加载它。
+
+| 序列          | 已验证版本                       | 说明                                               |
+| ------------- | -------------------------------- | -------------------------------------------------- |
+| `0.1.5-rc`    | `0.1.5-rc.3`                     | 支持范围里最旧的一档，类型引用也钉在这一档上。     |
+| `0.1.6-alpha` | `0.1.6-alpha.1`、`0.1.6-alpha.2` | 这一序列已发布的全部版本；该档宿主不读 peer 要求。 |
+| `0.1.7-rc`    | `0.1.7-rc.2`                     | 第一个其宿主真正执行 peer 检查的序列。             |
+
+这行声明对每一档意味着什么、以及怎样加进一个新的版本，写在 [docs/compatibility.zh.md](docs/compatibility.zh.md) 里（英文原件为 [docs/compatibility.md](docs/compatibility.md)）。
+
 ## 安装
 
 DSH 从 npm 安装这个插件：
@@ -43,13 +55,16 @@ pnpm install    # installs dependencies and builds, because the prepare script r
 pnpm build      # rebuilds after a source change
 pnpm format     # rewrites the files Prettier reports
 pnpm check      # the full gate: formatting, lint, typecheck, build, tests
+pnpm compat     # runs the suite against every supported DSH version
 ```
+
+`pnpm compat` 会为每一个受支持的 DSH 版本装一份副本，并对着这份副本跑测试套件，因此不需要有人手工安装任何一个版本。
 
 构建产出两个文件：`lib/index.js` 是宿主部分，在 DSH 里以 Node 进程运行；`lib/client.js` 是浏览器部分，由 DSH 加载进它的 Web 客户端。`pnpm test` 可以单独跑这些测试套件；其中打包测试断言的对象是构建产物 `lib/client.js`，所以改动客户端部分后要先构建再测试。
 
 ## 持续集成
 
-每次推送到 `main` 以及每个拉取请求都会运行 `.github/workflows/ci.yml`：它在 Node.js 22.x 与 24.x 上执行 `pnpm check`。运行器上本来没有 DSH 安装，所以这一趟还会按本仓库固定的版本，装好 `test/contract-probe.test.mjs` 所校验的那套宿主。
+每次推送到 `main` 以及每个拉取请求都会运行 `.github/workflows/ci.yml`。这个工作流从 `compat/versions.json` 读取受支持的版本，因此没有任何一个任务会把版本号再写一遍。门禁在 Node.js 22.x 与 24.x 上对着最旧的受支持版本执行 `pnpm check`，兼容性任务为每一个受支持版本各跑一遍测试套件，类型检查对着最旧与最新的受支持版本各做一次，另外还有一个任务每天跟随 `next` 与 `alpha`，它不会让整次运行失败。
 
 ## 发布
 
@@ -71,7 +86,7 @@ pnpm version prerelease --preid beta   # 0.2.0 变成 0.2.0-beta.0
 pnpm publish --tag next
 ```
 
-每次发布都在对应的 GitHub Release 说明里记下它是针对哪一版 DSH 构建和测试的。`devDependencies` 里的 DSH 包固定在 `0.1.6-alpha.2`，而这个系列仍带 alpha 后缀，所以这里记的是一个确切的版本而不是一个范围：更新的 DSH 在测试套件对它跑通之前都属于未验证。
+每次发布都在对应的 GitHub Release 说明里记下它是针对哪一版 DSH 构建和测试的。那次发布支持的版本，就是打 tag 那个提交上的 `compat/versions.json` 所写的内容；`devDependencies` 里的 DSH 包钉在这个文件里最旧的序列上，因此编译器只接受最旧的受支持宿主已经具备的 API。放宽支持范围就是改这一个文件，再加一次跑绿的 `pnpm compat`：peer 范围、持续集成的版本矩阵与上面那张表都由它派生，而如果谁绕过它手写范围，`test/peer-range.test.mjs` 会失败。
 
 ## 来源与致谢
 

@@ -1,2 +1,10 @@
+# The plugin's peer requirement names the runtime that loads it, and that runtime
+# is never a dependency of this checkout: resolving it here would install a whole
+# DSH tree beside a plugin that only declares which versions it supports.
+autoInstallPeers: false
+
 minimumReleaseAgeExclude:
     - prettier@3.9.8
+    - "@deepseek-ai/dsh-app-boot@0.1.7-rc.2"
+    - "@deepseek-ai/dsh-atomic-write@0.1.7-rc.2"
+    - "@deepseek-ai/dsh-package-manifest@0.1.7-rc.2"

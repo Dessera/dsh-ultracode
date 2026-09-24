@@ -1,11 +1,28 @@
 # Continuous integration.
 #
-# The job runs the same gate a checkout runs by hand, `pnpm check`, on both
-# Node.js lines the package declares support for. A runner carries no DSH
-# installation, so the job also provisions the harness that the runtime contract
-# probe reads: that probe asserts the plugin's host service keys, browser seed
-# words and session event names against an installed harness, and it fails rather
-# than skips when it finds none.
+# Four jobs, each answering a different question about the same fact source.
+#
+# `plan` reads `compat/versions.json`, which is the one place this repository
+# states which harness versions it supports, and publishes the version lists the
+# other jobs run over. Nothing below restates a version.
+#
+# `check` runs the repository's own gate on both Node.js lines the package
+# declares, against the oldest supported harness. That is the version the type
+# references are pinned at, so a checkout and this job compile against the same
+# declarations.
+#
+# `compat` runs the whole suite against one provisioned harness per supported
+# version, which is what makes "does this plugin still work on the other series"
+# a machine's answer rather than a person's.
+#
+# `types` checks the type references against the ends of the supported range in a
+# throwaway copy: the oldest version decides which API the source may use, and the
+# newest decides whether anything it names has been removed.
+#
+# `heads` follows the `next` and `alpha` dist-tags on a schedule, because the
+# harness publishes on its own schedule and a quiet repository should still learn
+# that a new series broke something. It reports without blocking: an upstream
+# prerelease is not this repository's failure to own.
 
 name: CI
 
@@ -14,6 +31,8 @@ on:
         branches: [main]
     pull_request:
     workflow_dispatch:
+    schedule:
+        - cron: "0 3 * * *"
 
 # A newer run for the same branch replaces an older one instead of queueing
 # behind it.
@@ -25,18 +44,57 @@ permissions:
     contents: read
 
 jobs:
-    check:
-        name: Node.js ${{ matrix.node }}
+    plan:
+        name: Read the compatibility plan
         runs-on: ubuntu-latest
-        strategy:
-            fail-fast: false
-            matrix:
-                node: ["22.x", "24.x"]
+        outputs:
+            matrix: ${{ steps.plan.outputs.matrix }}
+            boundaries: ${{ steps.plan.outputs.boundaries }}
+            pinned: ${{ steps.plan.outputs.pinned }}
         steps:
             - uses: actions/checkout@v7
 
             # Reads the pnpm version from `packageManager`, so the workflow and a
             # checkout install with the same one.
+            - uses: pnpm/action-setup@v6
+
+            - uses: actions/setup-node@v7
+              with:
+                  node-version: "22.x"
+                  cache: pnpm
+
+            - name: Install dependencies
+              run: pnpm install --frozen-lockfile
+
+            # The three lists the other jobs need, taken from the plan rather than
+            # written here: the versions to run, the ends of the range to type
+            # check, and the oldest version the gate pins its types to.
+            - name: Read compat/versions.json
+              id: plan
+              run: |
+                  set -euo pipefail
+                  node scripts/compat.mjs --list --json > "$RUNNER_TEMP/plan.json"
+                  echo "matrix=$(node -p 'JSON.stringify(require(process.env.RUNNER_TEMP + "/plan.json").matrix)')" >> "$GITHUB_OUTPUT"
+                  echo "boundaries=$(node -p 'JSON.stringify(require(process.env.RUNNER_TEMP + "/plan.json").boundaries)')" >> "$GITHUB_OUTPUT"
+                  echo "pinned=$(node -p 'require(process.env.RUNNER_TEMP + "/plan.json").matrix[0]')" >> "$GITHUB_OUTPUT"
+
+    check:
+        name: Node.js ${{ matrix.node }}
+        needs: plan
+        runs-on: ubuntu-latest
+        strategy:
+            fail-fast: false
+            matrix:
+                node: ["22.x", "24.x"]
+        env:
+            # The compatibility runner provisions a harness-shaped directory per
+            # version here, and the gate reads the oldest one.
+            DSH_COMPAT_CACHE: ${{ runner.temp }}/dsh-compat
+            DSH_HOME: ${{ runner.temp }}/dsh-compat/${{ needs.plan.outputs.pinned }}
+            DSH_EXPECT_HARNESS_VERSION: ${{ needs.plan.outputs.pinned }}
+        steps:
+            - uses: actions/checkout@v7
+
             - uses: pnpm/action-setup@v6
 
             - uses: actions/setup-node@v7
@@ -47,37 +105,87 @@ jobs:
             - name: Install dependencies
               run: pnpm install --frozen-lockfile
 
-            - name: Provision the harness the runtime contract probe reads
-              # The tree goes under the runner's temporary directory rather than into the
-              # checkout, so no repository tool scans it. It is named through `DSH_HOME`,
-              # the variable that already points at the directory playing the role
-              # `~/.dsh` plays on a developer's machine.
-              run: |
-                  set -euo pipefail
-                  version=0.1.6-alpha.2
-                  anchor="$RUNNER_TEMP/dsh-harness/profiles/web"
-                  mkdir -p "$anchor"
-                  npm install --prefix "$anchor" --no-save --no-audit --no-fund \
-                      "@deepseek-ai/dsh-agent-loop@$version" \
-                      "@deepseek-ai/dsh-api-gateway@$version" \
-                      "@deepseek-ai/dsh-client-locale@$version" \
-                      "@deepseek-ai/dsh-client-ui-conversation@$version" \
-                      "@deepseek-ai/dsh-client-ui-renderer@$version" \
-                      "@deepseek-ai/dsh-client-ui-session@$version" \
-                      "@deepseek-ai/dsh-commands@$version" \
-                      "@deepseek-ai/dsh-llm@$version" \
-                      "@deepseek-ai/dsh-session@$version" \
-                      "@deepseek-ai/dsh-session-projection@$version" \
-                      "@deepseek-ai/dsh-tools@$version" \
-                      "@deepseek-ai/dsh-web-frontend@$version"
-                  # The browser shell publishes assets only and offers no entry point
-                  # to resolve, so the probe looks for that one package in the profile
-                  # folder itself rather than in its `node_modules`. The installation
-                  # above lands every package in `node_modules`, which is where the
-                  # probe resolves the rest from, so the same tree is exposed at the
-                  # second location too.
-                  ln -s "$anchor/node_modules/@deepseek-ai" "$anchor/@deepseek-ai"
-                  echo "DSH_HOME=$RUNNER_TEMP/dsh-harness" >> "$GITHUB_ENV"
+            - name: Provision and probe the oldest supported harness
+              run: node scripts/compat.mjs --version "${{ needs.plan.outputs.pinned }}"
 
             - name: Run the gate
               run: pnpm check
+
+    compat:
+        name: Harness ${{ matrix.version }}
+        needs: plan
+        runs-on: ubuntu-latest
+        strategy:
+            fail-fast: false
+            matrix:
+                version: ${{ fromJSON(needs.plan.outputs.matrix) }}
+        env:
+            DSH_COMPAT_CACHE: ${{ runner.temp }}/dsh-compat
+        steps:
+            - uses: actions/checkout@v7
+
+            - uses: pnpm/action-setup@v6
+
+            - uses: actions/setup-node@v7
+              with:
+                  node-version: "22.x"
+                  cache: pnpm
+
+            - name: Install dependencies
+              run: pnpm install --frozen-lockfile
+
+            # `--json` keeps stdout machine readable; the human table lands in the
+            # job summary, where a reviewer looks for it.
+            - name: Run the suite against this harness
+              run: node scripts/compat.mjs --version "${{ matrix.version }}" --json
+
+    types:
+        name: Type references at ${{ matrix.version }}
+        needs: plan
+        runs-on: ubuntu-latest
+        strategy:
+            fail-fast: false
+            matrix:
+                version: ${{ fromJSON(needs.plan.outputs.boundaries) }}
+        env:
+            DSH_COMPAT_CACHE: ${{ runner.temp }}/dsh-compat
+        steps:
+            - uses: actions/checkout@v7
+
+            - uses: pnpm/action-setup@v6
+
+            - uses: actions/setup-node@v7
+              with:
+                  node-version: "22.x"
+                  cache: pnpm
+
+            - name: Install dependencies
+              run: pnpm install --frozen-lockfile
+
+            - name: Type check against this harness
+              run: node scripts/compat.mjs --version "${{ matrix.version }}" --type
+
+    heads:
+        name: Follow the newest harness
+        if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+        runs-on: ubuntu-latest
+        # The dist-tags move without this repository doing anything, so a failure
+        # here is news rather than a broken build.
+        continue-on-error: true
+        env:
+            DSH_COMPAT_CACHE: ${{ runner.temp }}/dsh-compat
+        steps:
+            - uses: actions/checkout@v7
+
+            - uses: pnpm/action-setup@v6
+
+            - uses: actions/setup-node@v7
+              with:
+                  node-version: "22.x"
+                  cache: pnpm
+
+            - name: Install dependencies
+              run: pnpm install --frozen-lockfile
+
+            - name: Run the suite against the next and alpha heads
+              run: node scripts/compat.mjs --heads
