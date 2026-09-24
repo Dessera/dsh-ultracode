@@ -1,0 +1,338 @@
+# Release.
+#
+# A tag is the release authority: `vX.Y.Z` names the commit that was built, and the
+# registry never lets that version be replaced. This workflow turns a tag into the
+# two records a release owes — the package on npm, and a GitHub Release that says
+# what that package was built and tested against — so that neither one is written
+# by hand.
+#
+# It runs by hand today, and its `publish` input defaults to false. That is the
+# first of three stages, and the order matters:
+#
+#   1. A run with `publish` left false only writes the Release. That is how the
+#      releases that shipped before this workflow existed get the record they never
+#      had, and it touches npm in no way at all.
+#   2. A run with `publish: true` against a version that is already on the registry
+#      exercises the publishing path end to end while publishing nothing: the run
+#      notices the version is published and skips the publish step.
+#   3. Real publishing needs the tag trigger, the `id-token: write` permission and
+#      the trusted publisher registered on npm. All three arrive together, because
+#      a tag that fires a publish nobody registered would only fail.
+#
+# Until then a version that is not on the registry, with `publish: true`, fails at
+# the publish step with an authentication error. Nothing is written on that path,
+# so the failure is loud and harmless.
+
+name: Release
+
+on:
+    workflow_dispatch:
+        inputs:
+            tag:
+                description: The existing tag to release from, for example v0.1.2
+                required: true
+                type: string
+            publish:
+                description: Publish to npm when this version is not on the registry yet
+                required: false
+                default: false
+                type: boolean
+            distTag:
+                description: The npm dist-tag to publish under; empty picks latest or next from the version
+                required: false
+                default: ""
+                type: string
+
+# Reads everywhere; the one job that writes repository contents asks for that
+# separately, so the permission is visible next to the steps that use it.
+permissions:
+    contents: read
+
+# A release is never cancelled halfway through, so this group never cancels.
+concurrency:
+    group: release-${{ inputs.tag }}
+    cancel-in-progress: false
+
+jobs:
+    plan:
+        name: Verify the tag
+        runs-on: ubuntu-latest
+        outputs:
+            tag: ${{ steps.verify.outputs.tag }}
+            name: ${{ steps.verify.outputs.name }}
+            version: ${{ steps.verify.outputs.version }}
+            sha: ${{ steps.verify.outputs.sha }}
+            published: ${{ steps.verify.outputs.published }}
+            previous: ${{ steps.verify.outputs.previous }}
+            newest: ${{ steps.verify.outputs.newest }}
+        steps:
+            - uses: actions/checkout@v7
+              with:
+                  # The ancestry check, the previous tag and the newest tag all need
+                  # the history and the tags, which a shallow checkout does not carry.
+                  fetch-depth: 0
+
+            - uses: actions/setup-node@v7
+              with:
+                  node-version: "24.x"
+                  # A release reads nothing out of a cache a normal run wrote.
+                  package-manager-cache: false
+
+            # Four things decide whether a run may touch anything at all: the tag
+            # exists, it names the version the tree carries, it points at a commit
+            # this repository released from, and the notes know which release came
+            # before it. The registry lookup in the same step is what tells the
+            # publishing path whether there is anything left to do.
+            - name: Verify the tag, and read what the registry already has
+              id: verify
+              env:
+                  TAG: ${{ inputs.tag }}
+                  TAGGED: ${{ runner.temp }}/tagged-package.json
+              run: |
+                  set -euo pipefail
+
+                  if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$ ]]; then
+                      echo "::error::$TAG is not a release tag of the form vX.Y.Z"
+                      exit 1
+                  fi
+                  if ! git rev-parse --verify --quiet "refs/tags/$TAG" > /dev/null; then
+                      echo "::error::this repository carries no tag named $TAG"
+                      exit 1
+                  fi
+
+                  git show "$TAG:package.json" > "$TAGGED"
+                  name="$(node -p "JSON.parse(require('node:fs').readFileSync(process.env.TAGGED, 'utf8')).name")"
+                  version="${TAG#v}"
+                  declared="$(node -p "JSON.parse(require('node:fs').readFileSync(process.env.TAGGED, 'utf8')).version")"
+                  if [ "$declared" != "$version" ]; then
+                      echo "::error::$TAG names $version, but package.json at that tag says $declared"
+                      exit 1
+                  fi
+
+                  sha="$(git rev-list -n 1 "$TAG")"
+                  if ! git merge-base --is-ancestor "$sha" origin/main; then
+                      echo "::error::$sha is not an ancestor of origin/main, so $TAG does not name a commit this repository released from"
+                      exit 1
+                  fi
+
+                  if npm view "$name@$version" version > /dev/null 2>&1; then
+                      published=true
+                  else
+                      published=false
+                  fi
+
+                  previous="$(git describe --tags --abbrev=0 --match 'v[0-9]*' "${TAG}^" 2>/dev/null || true)"
+                  # Which release GitHub labels "Latest" is decided by when a release
+                  # is created rather than by its version, so the flag has to be set
+                  # explicitly: backfilling older tags after a newer one exists would
+                  # otherwise relabel the older tag as latest.
+                  newest="$(git tag --list 'v[0-9]*' --sort=-v:refname | head -n 1)"
+
+                  {
+                      echo "tag=$TAG"
+                      echo "name=$name"
+                      echo "version=$version"
+                      echo "sha=$sha"
+                      echo "published=$published"
+                      echo "previous=$previous"
+                      echo "newest=$newest"
+                  } >> "$GITHUB_OUTPUT"
+
+    release:
+        name: Write the release
+        needs: plan
+        runs-on: ubuntu-latest
+        permissions:
+            # Creating the Release and uploading its assets is the only write this
+            # job performs. `id-token: write` belongs here too, and arrives with the
+            # tag trigger: it is the permission the registry exchanges for a
+            # publishing token, so nothing needs it until publishing is live.
+            contents: write
+        env:
+            TAG: ${{ needs.plan.outputs.tag }}
+            NAME: ${{ needs.plan.outputs.name }}
+            VERSION: ${{ needs.plan.outputs.version }}
+        steps:
+            # Two checkouts, because the generator and the facts live in different
+            # commits. The generator belongs to the commit this workflow runs from,
+            # and the facts belong to the tag: a tag that shipped before the
+            # generator existed still gets its Release written by today's generator.
+            - name: Check out the commit this workflow runs from
+              uses: actions/checkout@v7
+
+            - name: Check out the tagged tree
+              uses: actions/checkout@v7
+              with:
+                  ref: ${{ needs.plan.outputs.tag }}
+                  path: tree
+
+            - uses: pnpm/action-setup@v6
+
+            - uses: actions/setup-node@v7
+              with:
+                  node-version: "24.x"
+                  cache: pnpm
+                  cache-dependency-path: tree/pnpm-lock.yaml
+
+            - name: Decide what this run does
+              id: decide
+              env:
+                  PUBLISHED: ${{ needs.plan.outputs.published }}
+                  REQUESTED: ${{ github.event_name == 'push' || inputs.publish }}
+              run: |
+                  set -euo pipefail
+                  if [ "$PUBLISHED" = "true" ]; then
+                      echo "::notice::$NAME@$VERSION is already on the registry, so this run only writes the Release"
+                      echo "publish=false" >> "$GITHUB_OUTPUT"
+                  elif [ "$REQUESTED" = "true" ]; then
+                      echo "publish=true" >> "$GITHUB_OUTPUT"
+                  else
+                      echo "::notice::$NAME@$VERSION is not on the registry, and this run was not asked to publish it"
+                      echo "publish=false" >> "$GITHUB_OUTPUT"
+                  fi
+
+            # The gate is what a publish owes the people who install it, so it runs
+            # only when something is about to be published. The compatibility matrix
+            # is the claim the Release makes, which is why it runs here rather than
+            # relying on a continuous integration run that a tag does not trigger.
+            - name: Install the tagged tree
+              if: steps.decide.outputs.publish == 'true'
+              working-directory: tree
+              run: pnpm install --frozen-lockfile
+
+            - name: Provision the oldest supported harness, then run the gate
+              if: steps.decide.outputs.publish == 'true'
+              working-directory: tree
+              env:
+                  DSH_COMPAT_CACHE: ${{ runner.temp }}/dsh-compat
+              run: |
+                  set -euo pipefail
+                  pinned="$(node -e "import('./compat/plan.mjs').then(m => process.stdout.write(m.matrixOf(m.readPlan())[0]))")"
+                  {
+                      echo "DSH_COMPAT_CACHE=$DSH_COMPAT_CACHE"
+                      echo "DSH_HOME=$DSH_COMPAT_CACHE/$pinned"
+                      echo "DSH_EXPECT_HARNESS_VERSION=$pinned"
+                  } >> "$GITHUB_ENV"
+                  node scripts/compat.mjs --version "$pinned"
+                  pnpm check
+
+            - name: Run the compatibility matrix this release claims
+              if: steps.decide.outputs.publish == 'true'
+              working-directory: tree
+              env:
+                  DSH_COMPAT_CACHE: ${{ runner.temp }}/dsh-compat
+              run: node scripts/compat.mjs --type --update
+
+            - name: Build and pack the tarball that will be published
+              if: steps.decide.outputs.publish == 'true'
+              id: pack
+              working-directory: tree
+              run: |
+                  set -euo pipefail
+                  # `--ignore-scripts`: the gate above already ran, and publishing
+                  # would otherwise run it a second time through `prepublishOnly`.
+                  pnpm build
+                  npm pack --ignore-scripts
+                  tgz="$(ls ./*.tgz)"
+                  sha512="$(node -e 'const c = require("node:crypto"), f = require("node:fs"); process.stdout.write(c.createHash("sha512").update(f.readFileSync(process.argv[1])).digest("base64"))' "$tgz")"
+                  {
+                      echo "path=$PWD/$tgz"
+                      echo "sha512=$sha512"
+                  } >> "$GITHUB_OUTPUT"
+
+            - name: Publish the tarball
+              if: steps.decide.outputs.publish == 'true'
+              working-directory: tree
+              env:
+                  TGZ: ${{ steps.pack.outputs.path }}
+                  DIST_TAG: ${{ inputs.distTag }}
+              run: |
+                  set -euo pipefail
+                  tag="$DIST_TAG"
+                  if [ -z "$tag" ]; then
+                      case "$VERSION" in
+                          *-*) tag=next ;;
+                          *) tag=latest ;;
+                      esac
+                  fi
+                  echo "::notice::publishing $NAME@$VERSION under the $tag dist-tag"
+                  npm publish "$TGZ" --tag "$tag"
+
+            # What the registry serves is the one fact a release note cannot
+            # restate: it is read back from the registry, and when this run
+            # published, it is also compared with the bytes that were built. A
+            # version that is not on the registry at all leaves the fact empty
+            # rather than failing the run, because a run that was not asked to
+            # publish still owes its Release.
+            - name: Read what the registry serves for this version
+              id: registry
+              run: |
+                  set -euo pipefail
+                  integrity="$(npm view "$NAME@$VERSION" dist.integrity 2>/dev/null || true)"
+                  echo "integrity=$integrity" >> "$GITHUB_OUTPUT"
+                  if [ "${{ steps.decide.outputs.publish }}" = "true" ]; then
+                      built="sha512-${{ steps.pack.outputs.sha512 }}"
+                      if [ "$integrity" != "$built" ]; then
+                          echo "::error::the registry serves $integrity, but this run built $built"
+                          exit 1
+                      fi
+                  fi
+
+            - name: Write the release notes
+              id: notes
+              run: |
+                  set -euo pipefail
+                  node scripts/release-notes.mjs \
+                      --root tree \
+                      --tag "$TAG" \
+                      --sha "${{ needs.plan.outputs.sha }}" \
+                      --previous "${{ needs.plan.outputs.previous }}" \
+                      --integrity "${{ steps.registry.outputs.integrity }}" \
+                      > "$RUNNER_TEMP/notes.md"
+                  cat "$RUNNER_TEMP/notes.md" >> "$GITHUB_STEP_SUMMARY"
+
+            - name: Create or update the Release
+              env:
+                  GH_TOKEN: ${{ github.token }}
+              run: |
+                  set -euo pipefail
+                  if [ "${{ needs.plan.outputs.newest }}" = "$TAG" ]; then
+                      latest=(--latest)
+                  else
+                      latest=(--latest=false)
+                  fi
+                  # A prerelease is marked as one so that it is never the release a
+                  # visitor is pointed at; GitHub labels no prerelease "Latest".
+                  flags=("${latest[@]}")
+                  case "$VERSION" in
+                      *-*) flags+=(--prerelease) ;;
+                  esac
+                  if gh release view "$TAG" > /dev/null 2>&1; then
+                      gh release edit "$TAG" "${flags[@]}" --title "$TAG" --notes-file "$RUNNER_TEMP/notes.md"
+                  else
+                      gh release create "$TAG" "${flags[@]}" --title "$TAG" --notes-file "$RUNNER_TEMP/notes.md" --verify-tag
+                  fi
+
+            # The report and the tarball are attached only when this run produced
+            # them: a run that published nothing has no tarball of its own, and
+            # attaching something else under that name would misstate what the
+            # registry serves.
+            - name: Attach the run's report and tarball
+              env:
+                  GH_TOKEN: ${{ github.token }}
+                  TGZ: ${{ steps.pack.outputs.path }}
+              run: |
+                  set -euo pipefail
+                  assets=()
+                  if [ -f tree/compat/matrix.json ]; then
+                      cp tree/compat/matrix.json "$RUNNER_TEMP/compat-matrix.json"
+                      assets+=("$RUNNER_TEMP/compat-matrix.json")
+                  fi
+                  if [ -n "$TGZ" ] && [ -f "$TGZ" ]; then
+                      assets+=("$TGZ")
+                  fi
+                  if [ ${#assets[@]} -gt 0 ]; then
+                      gh release upload "$TAG" "${assets[@]}" --clobber
+                  else
+                      echo "::notice::this run built nothing to attach, because it published nothing"
+                  fi

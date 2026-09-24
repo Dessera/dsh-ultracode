@@ -98,6 +98,10 @@ pnpm publish --tag next
 
 Each release records the DSH version it was built and tested against, in the notes of its GitHub Release. The version that release supports is whatever `compat/versions.json` said at the tagged commit, and the DSH packages in `devDependencies` are pinned at the oldest series in it, so the compiler only accepts the API that the oldest supported host already has. Widening support is an edit to that one file plus a green `pnpm compat` run: the peer range, the continuous integration matrix and the table above all derive from it, and `test/peer-range.test.mjs` fails if the range is written by hand instead.
 
+Those notes are not written by hand. `.github/workflows/release.yml` writes them, run from the Actions tab with the tag as its input: it reads the supported DSH versions out of the tagged tree — `compat/versions.json` when the tag carries one, and the harness version that tree pins for a tag older than that file — reads the published tarball's integrity back from the registry, and writes the Release. `test/release-notes.test.mjs` pins what the notes say. Run it once per tag.
+
+Publishing itself is still the hand step above. The workflow carries a publishing path of its own — it runs the gate, publishes the tarball it built, and attaches that tarball and the compatibility report to the Release — and that path is not enabled yet.
+
 ## Sources and acknowledgements
 
 This package is written from two upstream projects, and the MIT notice of each one is carried in [LICENSE](LICENSE).

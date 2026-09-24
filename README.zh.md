@@ -88,6 +88,10 @@ pnpm publish --tag next
 
 每次发布都在对应的 GitHub Release 说明里记下它是针对哪一版 DSH 构建和测试的。那次发布支持的版本，就是打 tag 那个提交上的 `compat/versions.json` 所写的内容；`devDependencies` 里的 DSH 包钉在这个文件里最旧的序列上，因此编译器只接受最旧的受支持宿主已经具备的 API。放宽支持范围就是改这一个文件，再加一次跑绿的 `pnpm compat`：peer 范围、持续集成的版本矩阵与上面那张表都由它派生，而如果谁绕过它手写范围，`test/peer-range.test.mjs` 会失败。
 
+这些说明不是手写的。写出它们的是 `.github/workflows/release.yml`，从 Actions 页面运行，把 tag 作为输入：它从被 tag 的那棵树里读出受支持的 DSH 版本——这个 tag 带着 `compat/versions.json` 就用它，早于该文件的 tag 就用那棵树钉的宿主版本——再从 registry 读回已发布压缩包的 integrity，然后写出这次 Release。说明里写什么由 `test/release-notes.test.mjs` 钉住。每个 tag 运行一次。
+
+发布这一步目前仍由上面那几条命令手工完成。工作流里也带了一条发布路径——它会跑门禁、发布自己构建出的压缩包，并把该压缩包与兼容性报告附到 Release 上——这条路径尚未启用。
+
 ## 来源与致谢
 
 这个包建立在两个上游项目之上，两者的 MIT 声明都收在 [LICENSE](LICENSE) 里。
