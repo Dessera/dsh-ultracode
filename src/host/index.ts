@@ -34,6 +34,7 @@ import { resolveConfig } from "./config.ts";
 import {
     COMMAND_NAME,
     isUltracodeLevel,
+    isUltracodeSource,
     levelLabel,
     LEVEL_WORDS,
     nextUltracodeLevel,
@@ -334,7 +335,6 @@ export const apply = (ctx: Context, rawConfig: unknown): (() => void) => {
             states.consumeDisarm(agent.session);
             const notice = createBannerMessage(
                 buildDisarmNotice(),
-                name,
                 disarmSummary(),
             );
             const messages = decision.messages.toSpliced(
@@ -356,7 +356,6 @@ export const apply = (ctx: Context, rawConfig: unknown): (() => void) => {
             states.announce(agent.session, stepLevel)
                 ? buildInjection(stepLevel)
                 : buildReminder(stepLevel),
-            name,
             injectionSummary(stepLevel),
         );
         const messages = decision.messages.toSpliced(
@@ -489,10 +488,9 @@ function openingIndex(messages: readonly StepMessage[]): number {
     for (let index = messages.length - 1; index >= 0; index -= 1) {
         const message = messages[index];
         if (message === undefined) continue;
-        const source = message.source as
-            { kind?: unknown; plugin?: unknown } | undefined;
+        const source = message.source as { kind?: unknown } | undefined;
         if (source?.kind === "tool") continue;
-        if (source?.kind === "plugin" && source.plugin === name) continue;
+        if (isUltracodeSource(source)) continue;
         return index;
     }
     return -1;

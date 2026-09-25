@@ -19,9 +19,9 @@
 import {
     COMMAND_NAME,
     initialWire,
+    isUltracodeSource,
     nextUltracodeLevel,
     parseUltracodeLevel,
-    PLUGIN_ID,
     type UltracodeLevel,
     type UltracodeWire,
 } from "./protocol.ts";
@@ -65,12 +65,12 @@ export interface SessionEventShape {
         readonly name?: unknown;
         readonly args?: unknown;
         readonly kind?: unknown;
-        readonly source?: {
-            readonly kind?: unknown;
-            readonly plugin?: unknown;
-            readonly form?: unknown;
-            readonly summary?: unknown;
-        };
+        /**
+         * The message source. The fold reads the summary out of it, and whether
+         * the message is this plugin's own is decided by the producer check,
+         * which receives the whole value rather than field by field.
+         */
+        readonly source?: { readonly summary?: unknown };
     };
 }
 
@@ -147,20 +147,17 @@ function levelOfSummary(summary: unknown): UltracodeLevel | undefined {
  * Whether one message is the banner this plugin injected.
  *
  * Identification goes through the message source rather than through its text:
- * a plugin-injected notice is the only kind of message that carries this
- * plugin's id, and matching on words would also match a human quoting it.
+ * a notice this plugin produced is the only message that names this plugin as
+ * its producer, and matching on words would also match a human quoting it. The
+ * form and the summary are what separate a banner or a disarm notice from any
+ * other message the plugin might one day inject.
  * @param source - the message's source descriptor.
- * @returns whether the message is this plugin's arming banner.
+ * @returns whether the message is this plugin's banner or disarm notice.
  */
 function isBannerSource(source: unknown): boolean {
-    if (typeof source !== "object" || source === null) return false;
+    if (!isUltracodeSource(source)) return false;
     const record = source as Record<string, unknown>;
-    return (
-        record.kind === "plugin" &&
-        record.plugin === PLUGIN_ID &&
-        record.form === "notice" &&
-        typeof record.summary === "string"
-    );
+    return record.form === "notice" && typeof record.summary === "string";
 }
 
 /**

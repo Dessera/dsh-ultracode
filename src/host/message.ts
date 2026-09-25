@@ -14,6 +14,8 @@
  */
 import { randomUUID } from "node:crypto";
 
+import { PLUGIN_SOURCE_KIND } from "./protocol.ts";
+
 /** One model-facing content block. */
 export interface TextBlock {
     readonly type: "text";
@@ -24,10 +26,11 @@ export interface TextBlock {
  * Producer-declared context form. `notice` is the harness's own value for a
  * one-off account of something that just happened, which is what an injected
  * banner is, and it gives the transcript a collapsed row with a summary line.
+ * The kind is this plugin's own producer kind, so the message names its writer
+ * without a second field repeating it.
  */
 export interface NoticeSource {
-    readonly kind: "plugin";
-    readonly plugin: string;
+    readonly kind: typeof PLUGIN_SOURCE_KIND;
     readonly form: "notice";
     readonly summary: string;
 }
@@ -67,13 +70,11 @@ function deepFreeze<T>(value: T): T {
 /**
  * Build the banner message.
  * @param text - the complete injected text.
- * @param plugin - the plugin name recorded as the producer.
  * @param summary - one-line account shown on the collapsed transcript row.
  * @returns the frozen message to insert into the entering batch.
  */
 export function createBannerMessage(
     text: string,
-    plugin: string,
     summary: string,
 ): BannerMessage {
     return deepFreeze({
@@ -81,8 +82,7 @@ export function createBannerMessage(
         role: "user" as const,
         content: [{ type: "text" as const, text }],
         source: {
-            kind: "plugin" as const,
-            plugin,
+            kind: PLUGIN_SOURCE_KIND,
             form: "notice" as const,
             summary,
         },

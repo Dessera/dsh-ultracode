@@ -11,11 +11,14 @@
  */
 import assert from "node:assert/strict";
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
+import { pathToFileURL } from "node:url";
 
 import {
+    PLUGIN_SOURCE_KIND,
     ULTRACODE_KEY,
     ULTRACODE_STATE_VERSION,
 } from "../src/host/protocol.ts";
@@ -35,13 +38,13 @@ function humanMessage(text) {
     };
 }
 
-/** Build a plugin-sourced message, as a synthetic context injection arrives. */
+/** Build a message another plugin injected, as the pre-step batch carries it. */
 function syntheticMessage(text) {
     return {
         id: `m-${Math.random().toString(36).slice(2)}`,
         role: "user",
         content: [{ type: "text", text }],
-        source: { kind: "plugin", plugin: "fixture" },
+        source: { kind: "plugin:fixture" },
     };
 }
 
@@ -274,8 +277,7 @@ test(
             "the banner goes directly after the opening message",
         );
         const banner = decision.messages[2];
-        assert.equal(banner.source.kind, "plugin");
-        assert.equal(banner.source.plugin, "dsh-ultracode");
+        assert.equal(banner.source.kind, PLUGIN_SOURCE_KIND);
         assert.ok(banner.content[0].text.includes("Effort: ULTRA"));
         assert.ok(banner.content[0].text.includes("standing ultracode mode"));
 
@@ -336,7 +338,7 @@ test(
                 2,
                 `"${text}" must be injected while the level is armed`,
             );
-            assert.equal(decision.messages[1].source.plugin, "dsh-ultracode");
+            assert.equal(decision.messages[1].source.kind, PLUGIN_SOURCE_KIND);
         }
     },
 );
@@ -361,7 +363,7 @@ test(
             2,
             "an automatic continuation round must carry the banner",
         );
-        assert.equal(decision.messages[1].source.plugin, "dsh-ultracode");
+        assert.equal(decision.messages[1].source.kind, PLUGIN_SOURCE_KIND);
     },
 );
 
@@ -437,7 +439,7 @@ test(
             "user",
             "the notice follows the message that opened the turn",
         );
-        assert.equal(owed.messages[1].source.plugin, "dsh-ultracode");
+        assert.equal(owed.messages[1].source.kind, PLUGIN_SOURCE_KIND);
         assert.equal(
             owed.messages[1].source.summary,
             "ultracode mode ended before this turn",
@@ -671,7 +673,7 @@ test(
             "the steer must carry a banner despite the unchanged turn",
         );
         assert.equal(steered.messages[1].id, steer.id);
-        assert.equal(steered.messages[2].source.plugin, "dsh-ultracode");
+        assert.equal(steered.messages[2].source.kind, PLUGIN_SOURCE_KIND);
     },
 );
 
@@ -953,8 +955,7 @@ test(
             seq: 4,
             data: {
                 source: {
-                    kind: "plugin",
-                    plugin: "dsh-ultracode",
+                    kind: PLUGIN_SOURCE_KIND,
                     form: "notice",
                     summary: "ultracode ultra armed this turn",
                 },
@@ -1016,6 +1017,88 @@ test(
             decision.messages.length,
             1,
             "an unarmed session must not be injected",
+        );
+    },
+);
+
+/**
+ * Load the session-format library the installed host writes sessions with.
+ *
+ * That library decides whether a message may be stored at all, so it is the
+ * only authority on the source a message must carry. It is not a package of the
+ * profile's own: it ships inside the harness installation, which is why it is
+ * resolved from the entry of a harness package the profile really runs.
+ * @returns the loaded module, or undefined when this host carries no such library.
+ */
+async function loadSessionFormat() {
+    const sentinel = findPackage("@deepseek-ai/dsh-tools");
+    if (sentinel === undefined) return undefined;
+    try {
+        const entry = createRequire(sentinel).resolve(
+            "@deepseek-ai/dsh-session-format-v3-to-v4",
+        );
+        return await import(pathToFileURL(entry).href);
+    } catch {
+        return undefined;
+    }
+}
+
+test(
+    "the installed host writer admits the source the injected banner carries",
+    { skip: !available },
+    async (context) => {
+        const format = await loadSessionFormat();
+        const codec = format?.releasedV4SessionFormatCodec;
+        if (typeof codec?.encodeEvent !== "function") {
+            return context.skip(
+                "this harness stores sessions in a format without message-source admission",
+            );
+        }
+
+        const module = await loadHostBundle(bundlePath);
+        const harness = makeContext();
+        module.apply(harness.ctx, {});
+        setLevel(harness, "ultra");
+        const preStep = harness.listeners.get("agent/pre-step");
+        const human = humanMessage("帮我重构一下这个模块的解析逻辑并补上单测");
+        const decision = await preStep(
+            { agent: harness.agent, messages: [human], turn: 1, step: 1 },
+            async () => ({ kind: "enter", messages: [human] }),
+        );
+        const banner = decision.messages[1];
+        assert.notEqual(banner, undefined, "the armed turn must be injected");
+
+        const row = {
+            type: "user/message",
+            seq: 1,
+            time: 1,
+            surfaceOp: "append",
+            data: banner,
+        };
+        assert.doesNotThrow(
+            () => codec.encodeEvent(row),
+            `the host refuses the source kind of the banner this plugin injects: ${JSON.stringify(banner.source)}`,
+        );
+
+        // The refusal that makes the line above worth asserting: a message source
+        // that only says `plugin` is a retired wrapper, and this is the error the
+        // session writer raises for it.
+        const retired = {
+            ...row,
+            data: {
+                ...banner,
+                source: {
+                    kind: "plugin",
+                    plugin: "dsh-ultracode",
+                    form: "notice",
+                    summary: "ultracode ultra armed this turn",
+                },
+            },
+        };
+        assert.throws(
+            () => codec.encodeEvent(retired),
+            /producer-owned source kind/u,
+            "the retired bare plugin kind must be refused by this host",
         );
     },
 );

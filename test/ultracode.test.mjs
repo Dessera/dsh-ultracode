@@ -8,7 +8,11 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { isUltracodeLevel, parseUltracodeLevel } from "../src/host/protocol.ts";
+import {
+    isUltracodeLevel,
+    parseUltracodeLevel,
+    PLUGIN_SOURCE_KIND,
+} from "../src/host/protocol.ts";
 import {
     BANNER_CLOSE,
     BANNER_OPEN,
@@ -39,8 +43,7 @@ function foldBanner(level) {
         seq: 1,
         data: {
             source: {
-                kind: "plugin",
-                plugin: "dsh-ultracode",
+                kind: PLUGIN_SOURCE_KIND,
                 form: "notice",
                 summary: injectionSummary(level),
             },
@@ -300,8 +303,7 @@ test("the fold reads a disarm notice as no level at all", () => {
             seq: 2,
             data: {
                 source: {
-                    kind: "plugin",
-                    plugin: "dsh-ultracode",
+                    kind: PLUGIN_SOURCE_KIND,
                     form: "notice",
                     summary: disarmSummary(),
                 },
@@ -318,13 +320,63 @@ test("the fold reads a disarm notice as no level at all", () => {
 test("the injected banner message is frozen all the way down", () => {
     const banner = createBannerMessage(
         "the injected text",
-        "dsh-ultracode",
         "ultracode ultra armed this turn",
     );
     assert.equal(Object.isFrozen(banner), true);
     assert.equal(Object.isFrozen(banner.content), true);
     assert.equal(Object.isFrozen(banner.content[0]), true);
     assert.equal(Object.isFrozen(banner.source), true);
+});
+
+test("the injected banner names its producer in the source kind", () => {
+    const banner = createBannerMessage(
+        "the injected text",
+        "ultracode ultra armed this turn",
+    );
+    // A durable message has to declare a producer, and the retired bare word is
+    // refused by a current host, so the kind carries the plugin identity instead.
+    assert.equal(banner.source.kind, PLUGIN_SOURCE_KIND);
+    assert.notEqual(banner.source.kind, "plugin");
+    assert.equal(banner.source.form, "notice");
+    assert.equal(banner.source.summary, "ultracode ultra armed this turn");
+    assert.equal(
+        Object.hasOwn(banner.source, "plugin"),
+        false,
+        "the producer name must not be repeated beside the kind",
+    );
+});
+
+test("the historical source shape is still read as this plugin's banner", () => {
+    // A log written before the kind changed carries the bare kind with the plugin
+    // id beside it, which is the shape the host's own format migration replaces.
+    const folded = applyProjectionEvent(initialProjectionState(), {
+        type: "user/message",
+        seq: 1,
+        data: {
+            source: {
+                kind: "plugin",
+                plugin: "dsh-ultracode",
+                form: "notice",
+                summary: injectionSummary("high"),
+            },
+        },
+    });
+    assert.equal(folded.level, "high");
+});
+
+test("another plugin's notice is never read as this plugin's banner", () => {
+    const folded = applyProjectionEvent(initialProjectionState(), {
+        type: "user/message",
+        seq: 1,
+        data: {
+            source: {
+                kind: "plugin:some-other-plugin",
+                form: "notice",
+                summary: injectionSummary("ultra"),
+            },
+        },
+    });
+    assert.equal(folded.level, "off");
 });
 
 test("adopting a folded level seeds the mirror once and never moves it again", () => {

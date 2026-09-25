@@ -19,6 +19,35 @@ import type { PendingCommand, ProjectionState } from "./reducer.ts";
 /** Plugin id, matching the plugin name and the composer seat id. */
 export const PLUGIN_ID = "dsh-ultracode";
 
+/**
+ * Producer kind this plugin writes into the source of every message it injects.
+ *
+ * A durable message has to name the producer that wrote it, and the bare word
+ * `plugin` does not: DSH refuses it as a retired wrapper, so the kind has to
+ * carry the identity itself. Writing `plugin:` followed by the plugin id is
+ * also what the harness's own format migration derives for this plugin's
+ * historical messages, so a banner injected now and one read back from an older
+ * log describe themselves with the same kind.
+ */
+export const PLUGIN_SOURCE_KIND = `plugin:${PLUGIN_ID}`;
+
+/**
+ * Whether one untrusted message source attributes its message to this plugin.
+ *
+ * The current kind is the whole test. The historical pair — the bare `plugin`
+ * kind with the plugin id beside it — is recognized as well, because a log
+ * written before the kind changed still carries it and a host that reads its
+ * own native session format hands those events over without rewriting them.
+ * @param source - the message's source descriptor.
+ * @returns whether this plugin is the declared producer.
+ */
+export function isUltracodeSource(source: unknown): boolean {
+    if (typeof source !== "object" || source === null) return false;
+    const record = source as Record<string, unknown>;
+    if (record.kind === PLUGIN_SOURCE_KIND) return true;
+    return record.kind === "plugin" && record.plugin === PLUGIN_ID;
+}
+
 /** Name of the slash command, without the leading slash. */
 export const COMMAND_NAME = "ultracode";
 

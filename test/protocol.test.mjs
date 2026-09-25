@@ -14,7 +14,7 @@ import { test } from "node:test";
 import {
     COMMAND_NAME,
     LEVELS,
-    PLUGIN_ID,
+    PLUGIN_SOURCE_KIND,
     ProjectionStateSchema,
     ULTRACODE_KEY,
     ULTRACODE_STATE_VERSION,
@@ -49,8 +49,7 @@ function banner(summary) {
         seq: 3,
         data: {
             source: {
-                kind: "plugin",
-                plugin: PLUGIN_ID,
+                kind: PLUGIN_SOURCE_KIND,
                 form: "notice",
                 summary,
             },
