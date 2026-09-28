@@ -16,7 +16,7 @@
  * The phrasing of the banner and of the two level instructions is adapted from
  * `pi-dynamic-workflows` (<https://github.com/QuintinShaw/pi-dynamic-workflows>),
  * which is MIT licensed; its notice, including the original author's copyright,
- * is carried in the repository's `LICENSE`.
+ * is carried in the repository's `NOTICE`.
  */
 import type { UltracodeLevel } from "./protocol.ts";
 
