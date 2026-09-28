@@ -205,4 +205,3 @@ flowchart TB
 - 客户端产物是一个包裹在模块加载器握手流程中的 CommonJS（CJS）包。该产物声明的外部依赖是 `react`、`react-dom` 与 JSX 运行时（这三个名字声明在 `tsdown.config.ts` 的 `CLIENT_EXTERNALS` 中）；浏览器平台模块表能应答这三个包，而内联第二份 React 会破坏 `hooks`。构建出来的产物最终只加载 React 与 JSX 运行时，其余依赖全部打包进该产物。
 - `prepare` 脚本会执行构建，因此一次 Git 安装就能产出两个产物。
 - `pnpm check` 按格式检查、lint、类型检查、构建与测试这个顺序执行这五项。
-- `pnpm compat` 针对每一个受支持的 DSH 版本各执行一遍同一套测试。

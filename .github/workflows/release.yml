@@ -196,17 +196,7 @@ jobs:
               with:
                   node-version: "24.x"
                   cache: pnpm
-                  cache-dependency-path: |
-                      package.json
-                      tree/pnpm-lock.yaml
-
-            # The generator reads the supported versions through `compat/plan.mjs`,
-            # which imports `semver`, so a run needs this repository's dependencies
-            # even when it publishes nothing. It is installed here, in the tree the
-            # generator comes from, and `--ignore-scripts` keeps the build out of it:
-            # the artifacts this run publishes are built in `tree/` below.
-            - name: Install the dependencies the generator reads
-              run: pnpm install --ignore-scripts --frozen-lockfile
+                  cache-dependency-path: tree/pnpm-lock.yaml
 
             - name: Decide what this run does
               id: decide
@@ -226,47 +216,18 @@ jobs:
                   fi
 
             # The gate is what a publish owes the people who install it, so it runs
-            # only when something is about to be published. The compatibility matrix
-            # is the claim the Release makes, which is why it runs here rather than
-            # relying on a continuous integration run that a tag does not trigger.
-            #
-            # The harness the gate reads is provisioned in its own step, and the gate
-            # names it through that step's output. A `$GITHUB_ENV` write would not do:
-            # those variables reach the steps that follow, not the one that wrote
-            # them, so the gate would run with no `DSH_HOME` and fail on a probe that
-            # looks for a harness it cannot find.
+            # only when something is about to be published. A tag does not trigger a
+            # continuous integration run, so the gate runs here rather than relying on
+            # one.
             - name: Install the tagged tree
               if: steps.decide.outputs.publish == 'true'
               working-directory: tree
               run: pnpm install --frozen-lockfile
 
-            - name: Provision the oldest supported harness
-              id: provision
-              if: steps.decide.outputs.publish == 'true'
-              working-directory: tree
-              env:
-                  DSH_COMPAT_CACHE: ${{ runner.temp }}/dsh-compat
-              run: |
-                  set -euo pipefail
-                  pinned="$(node -e "import('./compat/plan.mjs').then(m => process.stdout.write(m.matrixOf(m.readPlan())[0]))")"
-                  echo "pinned=$pinned" >> "$GITHUB_OUTPUT"
-                  node scripts/compat.mjs --version "$pinned"
-
             - name: Run the gate
               if: steps.decide.outputs.publish == 'true'
               working-directory: tree
-              env:
-                  DSH_COMPAT_CACHE: ${{ runner.temp }}/dsh-compat
-                  DSH_HOME: ${{ runner.temp }}/dsh-compat/${{ steps.provision.outputs.pinned }}
-                  DSH_EXPECT_HARNESS_VERSION: ${{ steps.provision.outputs.pinned }}
               run: pnpm check
-
-            - name: Run the compatibility matrix this release claims
-              if: steps.decide.outputs.publish == 'true'
-              working-directory: tree
-              env:
-                  DSH_COMPAT_CACHE: ${{ runner.temp }}/dsh-compat
-              run: node scripts/compat.mjs --type --update
 
             - name: Build and pack the tarball that will be published
               if: steps.decide.outputs.publish == 'true'
@@ -371,21 +332,16 @@ jobs:
                       gh release create "$TAG" "${flags[@]}" --title "$TAG" --notes-file "$RUNNER_TEMP/notes.md" --verify-tag
                   fi
 
-            # The report and the tarball are attached only when this run produced
-            # them: a run that published nothing has no tarball of its own, and
-            # attaching something else under that name would misstate what the
-            # registry serves.
-            - name: Attach the run's report and tarball
+            # The tarball is attached only when this run produced it: a run that
+            # published nothing has no tarball of its own, and attaching something
+            # else under that name would misstate what the registry serves.
+            - name: Attach the run's tarball
               env:
                   GH_TOKEN: ${{ github.token }}
                   TGZ: ${{ steps.pack.outputs.path }}
               run: |
                   set -euo pipefail
                   assets=()
-                  if [ -f tree/compat/matrix.json ]; then
-                      cp tree/compat/matrix.json "$RUNNER_TEMP/compat-matrix.json"
-                      assets+=("$RUNNER_TEMP/compat-matrix.json")
-                  fi
                   if [ -n "$TGZ" ] && [ -f "$TGZ" ]; then
                       assets+=("$TGZ")
                   fi

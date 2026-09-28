@@ -2,12 +2,9 @@
  * Tests for the release notes generator.
  *
  * The generator is the only thing that writes a GitHub Release, and a Release is
- * the record a person reads to decide whether a version fits their host. That makes
- * two properties worth pinning here. The version list must come from the tree
- * being released rather than from a list someone maintains beside it, and the
- * sentence about it must say which source it used, because a tag that shipped
- * before the compatibility plan existed was tested against the version it pinned
- * and must not be described as if the plan had covered it.
+ * the record a person reads to decide whether a version fits their host. The
+ * property worth pinning here is that the version list comes from the tree being
+ * released rather than from a list someone maintains beside it.
  *
  * Every case builds a small tree in a temporary directory, so the facts are the
  * ones the test wrote and nothing depends on this repository's own state.
@@ -23,21 +20,6 @@ import {
     parseArgs,
     readReleaseFacts,
 } from "../scripts/release-notes.mjs";
-
-/** A compatibility plan that lists two blocking series and one that is not. */
-const PLAN = {
-    series: [
-        { name: "0.1.5-rc", versions: ["0.1.5-rc.3"], blocking: true },
-        {
-            name: "0.1.6-alpha",
-            versions: ["0.1.6-alpha.1", "0.1.6-alpha.2"],
-            blocking: true,
-        },
-        { name: "0.1.7-rc", versions: ["0.1.7-rc.2"], blocking: false },
-    ],
-    heads: [{ tag: "next", blocking: false }],
-    packages: ["@deepseek-ai/dsh-tools"],
-};
 
 /**
  * Write a tree in a temporary directory and hand it to a test.
@@ -93,40 +75,7 @@ const CI = `jobs:
                 node: ["22.x", "24.x"]
 `;
 
-test("the compatibility plan decides the version list when the tag carries one", () => {
-    withTree(
-        {
-            "package.json": manifestOf(),
-            "compat/versions.json": PLAN,
-        },
-        (root) => {
-            const body = buildReleaseNotes(
-                readReleaseFacts(root, { tag: "v0.1.1" }),
-            );
-
-            assert.match(
-                body,
-                /every version `compat\/versions\.json` lists at this tag/u,
-            );
-            assert.ok(
-                body.indexOf("`0.1.5-rc.3`") < body.indexOf("`0.1.6-alpha.1`"),
-                "the plan's order is kept",
-            );
-            assert.ok(
-                body.indexOf("`0.1.6-alpha.1`") <
-                    body.indexOf("`0.1.6-alpha.2`"),
-                "a series lists its versions oldest first",
-            );
-            assert.doesNotMatch(
-                body,
-                /0\.1\.7-rc\.2/u,
-                "a series the plan does not block is not a version the release claims",
-            );
-        },
-    );
-});
-
-test("a tag without a compatibility plan records the version it pins", () => {
+test("the notes record the harness versions the tree pins", () => {
     withTree({ "package.json": manifestOf() }, (root) => {
         const body = buildReleaseNotes(
             readReleaseFacts(root, { tag: "v0.1.1" }),
@@ -136,7 +85,6 @@ test("a tag without a compatibility plan records the version it pins", () => {
             body,
             /- DSH `0\.1\.6-alpha\.2` — the version this tree pins in `devDependencies`\./u,
         );
-        assert.doesNotMatch(body, /compat\/versions\.json/u);
     });
 });
 
@@ -157,21 +105,6 @@ test("a tree that pins more than one version records every one of them", () => {
 
             assert.match(body, /`0\.1\.6-alpha\.2` and `0\.1\.7-rc\.2`/u);
             assert.match(body, /the versions this tree pins/u);
-        },
-    );
-});
-
-test("a plan that cannot be read is refused rather than passed over", () => {
-    withTree(
-        {
-            "package.json": manifestOf(),
-            "compat/versions.json": "{ not json",
-        },
-        (root) => {
-            assert.throws(
-                () => readReleaseFacts(root, { tag: "v0.1.1" }),
-                /cannot be read as JSON/u,
-            );
         },
     );
 });
@@ -334,7 +267,6 @@ test("the notes are written in English, because a Release is read outside this r
             "package.json": manifestOf({
                 peerDependencies: { "@deepseek-ai/dsh": ">=0.1.5-rc.3" },
             }),
-            "compat/versions.json": PLAN,
             ".github/workflows/ci.yml": CI,
         },
         (root) => {

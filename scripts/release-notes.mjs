@@ -8,12 +8,9 @@
  *
  * Where each fact comes from, and why:
  *
- * - The supported harness versions come from `compat/versions.json` when the tag
- *   carries one, and from the harness version pinned in `devDependencies`
- *   otherwise. Releases that shipped before the compatibility plan existed were
- *   tested against the version they pinned, so that pin is the honest answer for
- *   them. The version list is read through `compat/plan.mjs` rather than parsed
- *   again here, because the plan is the single place a supported version is stated.
+ * - The harness versions come from the `@deepseek-ai/dsh` packages pinned in
+ *   `devDependencies`. That pin is what the compiler checks the source against and
+ *   what the gate runs against, so it is the version a Release may claim.
  * - The Node.js lines come from the matrix of `.github/workflows/ci.yml` at the
  *   tag. A tag that carries no workflow gets no such line, rather than a claim the
  *   tag cannot support.
@@ -29,8 +26,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-
-import { matrixOf, readPlan } from "../compat/plan.mjs";
 
 /** The runtime package every harness dependency name starts with. */
 const RUNTIME_PREFIX = "@deepseek-ai/dsh";
@@ -94,22 +89,13 @@ function manifestOf(root) {
 }
 
 /**
- * Read the harness versions a tree claims support for.
- *
- * The compatibility plan wins when the tag carries one, because it is the file the
- * peer range, the continuous integration matrix and the published tables all
- * derive from.
+ * Read the harness versions a tree was built and tested against.
  * @param {string} root - directory holding the tree.
  * @param {Record<string, unknown>} fields - the tree's manifest.
- * @returns {{ versions: string[], source: "plan" | "pinned" }} the versions and where they came from.
- * @throws when neither source names a version.
+ * @returns {string[]} the pinned `@deepseek-ai/dsh` versions, sorted.
+ * @throws when the manifest pins none of them.
  */
 function runtimeVersionsOf(root, fields) {
-    const planPath = join(root, "compat", "versions.json");
-    if (existsSync(planPath)) {
-        const versions = matrixOf(readPlan(planPath));
-        if (versions.length > 0) return { versions, source: "plan" };
-    }
     const dependencies = fields.devDependencies ?? {};
     const versions = [
         ...new Set(
@@ -124,9 +110,9 @@ function runtimeVersionsOf(root, fields) {
     ].sort();
     if (versions.length === 0)
         throw new Error(
-            `${join(root, "package.json")} pins no ${RUNTIME_PREFIX} package and the tree carries no compatibility plan, so the notes have no version to record`,
+            `${join(root, "package.json")} pins no ${RUNTIME_PREFIX} package, so the notes have no version to record`,
         );
-    return { versions, source: "pinned" };
+    return versions;
 }
 
 /**
@@ -176,7 +162,7 @@ export function readReleaseFacts(root, options) {
  */
 export function buildReleaseNotes(facts) {
     const lines = [];
-    const versions = facts.runtime.versions.map((version) => `\`${version}\``);
+    const versions = facts.runtime.map((version) => `\`${version}\``);
 
     lines.push(`## ${facts.name} ${facts.tag}`, "");
     const built = facts.sha
@@ -185,11 +171,9 @@ export function buildReleaseNotes(facts) {
     lines.push(`Built and tested from ${built}.`, "");
 
     lines.push("### Built and tested against", "");
-    const pinned = facts.runtime.versions.length > 1 ? "versions" : "version";
+    const pinned = facts.runtime.length > 1 ? "versions" : "version";
     lines.push(
-        facts.runtime.source === "plan"
-            ? `- DSH ${listOf(versions)} — every version \`compat/versions.json\` lists at this tag.`
-            : `- DSH ${listOf(versions)} — the ${pinned} this tree pins in \`devDependencies\`.`,
+        `- DSH ${listOf(versions)} — the ${pinned} this tree pins in \`devDependencies\`.`,
     );
     if (facts.peerRange !== "")
         lines.push(

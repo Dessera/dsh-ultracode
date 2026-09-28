@@ -23,14 +23,6 @@ dsh-ultracode 提供的命令如下：
 
 插件的整体架构位于 [docs/architecture.zh.md](docs/architecture.zh.md)（英文原件为 [docs/architecture.md](docs/architecture.md)）。
 
-## 支持的 DSH 版本
-
-| 序列          | 已验证版本                       |
-| ------------- | -------------------------------- |
-| `0.1.5-rc`    | `0.1.5-rc.3`                     |
-| `0.1.6-alpha` | `0.1.6-alpha.1`、`0.1.6-alpha.2` |
-| `0.1.7-rc`    | `0.1.7-rc.2`                     |
-
 ## 安装
 
 从 npm 安装：
@@ -61,7 +53,6 @@ corepack pnpm install   # 用 corepack 运行 packageManager 中固定的 pnpm �
 corepack pnpm build     # 源码改动后重新构建
 corepack pnpm format    # 按 Prettier 的报告重写文件
 corepack pnpm check     # 完整门禁：格式、lint、类型检查、构建、测试
-corepack pnpm compat    # 针对每个受支持的 DSH 版本运行测试套件
 ```
 
 构建产出两个文件：`lib/index.js` 是宿主部分，在 DSH 中以 Node 进程运行；`lib/client.js` 是浏览器部分，由 DSH 加载进 Web 客户端。`corepack pnpm test` 单独运行测试；打包测试断言的对象是构建产物 `lib/client.js`，所以改动客户端部分后要先构建再测试。

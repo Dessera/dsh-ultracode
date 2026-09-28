@@ -302,4 +302,3 @@ builds the host artifact and the `client` item builds the client artifact. It ne
   runtime, and everything else is bundled.
 - The `prepare` script runs the build, so a Git install produces both artifacts.
 - `pnpm check` runs five steps in this order: format checking, lint, typecheck, build and tests.
-- `pnpm compat` runs the same test suite against each supported DSH version.

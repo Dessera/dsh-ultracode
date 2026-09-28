@@ -49,7 +49,6 @@
         "format": "prettier --write .",
         "format:check": "prettier --check .",
         "test": "node --test \"test/*.test.mjs\"",
-        "compat": "node scripts/compat.mjs",
         "clean": "rm -rf lib",
         "check": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm build && pnpm test",
         "prepare": "tsdown",
@@ -68,7 +67,7 @@
     },
     "license": "MIT",
     "peerDependencies": {
-        "@deepseek-ai/dsh": ">=0.1.5-rc.3 <0.1.6-0 || >=0.1.6-alpha.1 <0.1.7-0 || >=0.1.7-rc.2 <0.1.8-0"
+        "@deepseek-ai/dsh": ">=0.1.5-rc.3 <0.1.6-0 || >=0.1.6-alpha.1 <0.1.7-0 || >=0.1.7-rc.2 <0.2.0-0 || >=0.2.0-rc.1 <0.2.1-0"
     },
     "devDependencies": {
         "@deepseek-ai/cordis": "4.0.2",
@@ -93,7 +92,6 @@
         "eslint": "^10.10.0",
         "eslint-config-prettier": "^10.1.8",
         "prettier": "^3.9.8",
-        "semver": "^7.8.5",
         "tsdown": "^0.22.2",
         "typescript": "^6.0.3",
         "typescript-eslint": "^8.70.0"

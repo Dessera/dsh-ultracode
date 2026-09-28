@@ -23,14 +23,6 @@ The plugin provides these commands:
 
 The overall architecture of the plugin is in [docs/architecture.md](docs/architecture.md).
 
-## Supported DSH versions
-
-| Series        | Verified versions                |
-| ------------- | -------------------------------- |
-| `0.1.5-rc`    | `0.1.5-rc.3`                     |
-| `0.1.6-alpha` | `0.1.6-alpha.1`, `0.1.6-alpha.2` |
-| `0.1.7-rc`    | `0.1.7-rc.2`                     |
-
 ## Install
 
 Install from npm:
@@ -61,7 +53,6 @@ corepack pnpm install   # runs the pnpm version pinned in packageManager, instal
 corepack pnpm build     # rebuilds after a source change
 corepack pnpm format    # rewrites the files Prettier reports
 corepack pnpm check     # the full gate: formatting, lint, typecheck, build, tests
-corepack pnpm compat    # runs the suite against every supported DSH version
 ```
 
 The build writes two artifacts: `lib/index.js` is the host part, which runs in Node inside DSH, and `lib/client.js` is the browser part, which DSH loads into the web client. `corepack pnpm test` runs the tests on their own, and the bundle tests assert against the built `lib/client.js`, so build before testing a change to the client part.
