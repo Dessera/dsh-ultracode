@@ -354,8 +354,8 @@ export const apply = (ctx: Context, rawConfig: unknown): (() => void) => {
 
         const banner = createBannerMessage(
             states.announce(agent.session, stepLevel)
-                ? buildInjection(stepLevel)
-                : buildReminder(stepLevel),
+                ? buildInjection(stepLevel, config.conciseSubagentOutput)
+                : buildReminder(stepLevel, config.conciseSubagentOutput),
             injectionSummary(stepLevel),
         );
         const messages = decision.messages.toSpliced(

@@ -53,6 +53,21 @@ test("a partial configuration keeps the same remaining defaults on both sides", 
     }
 });
 
+test("the subagent briefing is on unless a deployment turns it off", () => {
+    // The setting exists to keep a workflow run inside the context it was given, and
+    // the failure it addresses is what such a run does by default, so the default is
+    // on and a deployment has to ask for the shorter injection.
+    assert.equal(resolveConfig(undefined).conciseSubagentOutput, true);
+    assert.equal(Config({}).conciseSubagentOutput, true);
+
+    // Both halves take the same answer when a deployment turns it off, for the same
+    // reason they agree on every other field: the loader validates the row the plugin
+    // then resolves, so a disagreement would only show up at run time.
+    const turnedOff = { conciseSubagentOutput: false };
+    assert.equal(Config(turnedOff).conciseSubagentOutput, false);
+    assert.equal(resolveConfig(turnedOff).conciseSubagentOutput, false);
+});
+
 test("a blank tool name is refused by the schema and by the resolver alike", () => {
     // The loader validates a deployment row against the schema, and the plugin then
     // runs on what the resolver returns. A blank name the schema accepted would

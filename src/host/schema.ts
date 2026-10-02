@@ -13,7 +13,10 @@
  */
 import z from "@deepseek-ai/schemastery";
 
-import { DEFAULT_TOOL_NAME } from "./config.ts";
+import {
+    DEFAULT_CONCISE_SUBAGENT_OUTPUT,
+    DEFAULT_TOOL_NAME,
+} from "./config.ts";
 
 /** Configuration schema registered with the loader under the `Config` export. */
 export const Config = z.object({
@@ -28,4 +31,10 @@ export const Config = z.object({
         .union([z.const("zh"), z.const("en")])
         .default("zh")
         .description("Language of the notices the plugin prints to the user."),
+    conciseSubagentOutput: z
+        .boolean()
+        .default(DEFAULT_CONCISE_SUBAGENT_OUTPUT)
+        .description(
+            "Whether the injected text tells the model to keep each agent's output brief and to have it hand its material back through files.",
+        ),
 });

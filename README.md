@@ -9,6 +9,7 @@ Ultracode session mode for DeepSeek Harness (DSH). The plugin adds a three-posit
 - `off` injects nothing, and the session keeps running as DSH ships it. The turn after a level is turned off carries one notice instead.
 - `high` and `ultra` arm the session while the workflow tool DSH provides resolves for that session, and every turn the session opens then carries an arming banner that tells the model the turn is authorised for multi-agent orchestration.
 - The first turn of a level carries the complete instruction block; every turn after that carries a one-line reminder instead. Turning the level off and arming it again states the block again.
+- While a session is armed, the injected text also asks the model to write every `agent()` prompt so that each agent keeps its output brief and hands its material back through files rather than in its reply. The configuration field `conciseSubagentOutput` controls this rule, and it is on by default.
 
 The plugin provides these commands:
 

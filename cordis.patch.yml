@@ -8,3 +8,6 @@
             # Name of the workflow tool as this deployment registers it. The control
             # and the injection both resolve visibility through this one name.
             workflowToolName: workflow
+            # Whether the injected text also tells the model to keep each agent's
+            # output brief and have it hand its material back through files.
+            conciseSubagentOutput: true

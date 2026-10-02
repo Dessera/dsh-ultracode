@@ -24,7 +24,9 @@ import {
     disarmSummary,
     FORBIDDEN_SCRIPT_NAMES,
     injectionSummary,
+    REMINDER_BRIEFING,
     SCRIPT_SURFACE,
+    SUBAGENT_BRIEFING,
 } from "../src/host/prompt.ts";
 import { createBannerMessage } from "../src/host/message.ts";
 import {
@@ -130,17 +132,57 @@ test("leaving for off makes the next arming state the block again", () => {
 
 test("the reminder names the level and still lets a trivial turn through", () => {
     for (const level of ["high", "ultra"]) {
-        const reminder = buildReminder(level);
+        for (const withSubagentBriefing of [false, true]) {
+            const reminder = buildReminder(level, withSubagentBriefing);
+            assert.ok(
+                reminder.includes(level),
+                `${level} reminder must name its level`,
+            );
+            assert.ok(
+                reminder.includes("trivial"),
+                `${level} reminder must keep the escape hatch`,
+            );
+        }
+    }
+    assert.equal(buildReminder("off", true), "");
+});
+
+test("the briefing reaches both injected forms only when the deployment asks for it", () => {
+    for (const level of ["high", "ultra"]) {
         assert.ok(
-            reminder.includes(level),
-            `${level} reminder must name its level`,
+            buildInjection(level, true).includes(SUBAGENT_BRIEFING),
+            `${level} block must carry the briefing`,
         );
         assert.ok(
-            reminder.includes("trivial"),
-            `${level} reminder must keep the escape hatch`,
+            buildReminder(level, true).includes(REMINDER_BRIEFING),
+            `${level} reminder must carry the briefing`,
+        );
+        assert.equal(
+            buildInjection(level, false).includes(SUBAGENT_BRIEFING),
+            false,
+            `${level} block must drop the briefing when it is off`,
+        );
+        assert.equal(
+            buildReminder(level, false).includes(REMINDER_BRIEFING),
+            false,
+            `${level} reminder must drop the briefing when it is off`,
         );
     }
-    assert.equal(buildReminder("off"), "");
+});
+
+test("the briefing asks for both halves of the rule", () => {
+    // Brevity without the file handoff still lets an agent answer with a whole report;
+    // the file handoff without brevity still fills the reply with what surrounds it.
+    for (const text of [SUBAGENT_BRIEFING, REMINDER_BRIEFING]) {
+        assert.ok(
+            text.includes("brief"),
+            "the reply must be asked to stay short",
+        );
+        assert.ok(
+            text.includes("files"),
+            "the material must be handed back as files",
+        );
+    }
 });
 
 test("leaving an armed level owes the next turn one disarm notice", () => {
@@ -221,15 +263,18 @@ test("the reminder is far shorter than the block it replaces", () => {
     // The whole point of the reminder is that a long session does not pay for the
     // full block on every turn, so the two must not drift into being alike.
     for (const level of ["high", "ultra"]) {
-        assert.ok(
-            buildReminder(level).length * 4 < buildInjection(level).length,
-            `${level} reminder is not meaningfully shorter than its block`,
-        );
+        for (const withSubagentBriefing of [false, true]) {
+            assert.ok(
+                buildReminder(level, withSubagentBriefing).length * 4 <
+                    buildInjection(level, withSubagentBriefing).length,
+                `${level} reminder is not meaningfully shorter than its block`,
+            );
+        }
     }
 });
 
 test("the banner names only the script surface the engine provides", () => {
-    const banner = buildBanner();
+    const banner = buildBanner(true);
     for (const hook of SCRIPT_SURFACE)
         assert.ok(banner.includes(hook), `banner should name ${hook}`);
     for (const forbidden of FORBIDDEN_SCRIPT_NAMES) {
@@ -243,13 +288,18 @@ test("the banner names only the script surface the engine provides", () => {
 
 test("no generated text names a hook the engine does not provide", () => {
     for (const level of ["high", "ultra"]) {
-        for (const text of [buildInjection(level), buildReminder(level)]) {
-            for (const forbidden of FORBIDDEN_SCRIPT_NAMES) {
-                assert.equal(
-                    text.includes(forbidden),
-                    false,
-                    `${level} must not name ${forbidden}`,
-                );
+        for (const withSubagentBriefing of [false, true]) {
+            for (const text of [
+                buildInjection(level, withSubagentBriefing),
+                buildReminder(level, withSubagentBriefing),
+            ]) {
+                for (const forbidden of FORBIDDEN_SCRIPT_NAMES) {
+                    assert.equal(
+                        text.includes(forbidden),
+                        false,
+                        `${level} must not name ${forbidden}`,
+                    );
+                }
             }
         }
     }
@@ -266,11 +316,11 @@ test("every armed level carries the escape sentence and off carries nothing", ()
 });
 
 test("the banner states why the turn is armed", () => {
-    assert.ok(buildBanner().includes("standing ultracode mode"));
+    assert.ok(buildBanner(true).includes("standing ultracode mode"));
 });
 
 test("the injected banner is wrapped in the stable open and close markers", () => {
-    const banner = buildBanner();
+    const banner = buildBanner(true);
     assert.equal(
         banner.startsWith(`---\n${BANNER_OPEN}`),
         true,

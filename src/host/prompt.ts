@@ -99,20 +99,50 @@ const ESCAPE_SENTENCE = [
 ].join("\n");
 
 /**
+ * The rule the model is told to carry into every workflow agent's prompt.
+ *
+ * A workflow hands each agent's whole reply back to the run, so an agent that
+ * answers with its material instead of a path to it is what can push the run past
+ * the context it was given. The rule therefore has two parts: keep the reply short,
+ * and hand the material over as a file the run can read on demand.
+ */
+export const SUBAGENT_BRIEFING = [
+    "Because the context length is limited, tell every agent you start to keep its",
+    "output brief and to hand its material back through files rather than in its reply.",
+].join("\n");
+
+/**
+ * The same rule in the compressed form the one-line reminder carries.
+ *
+ * It is written as a clause rather than as a line of its own because the reminder is
+ * the cheap form of the block, and a second line would be paid for on every turn.
+ */
+export const REMINDER_BRIEFING =
+    ", the agents you start are to reply briefly and hand their material back through files";
+
+/**
  * Build the banner inserted ahead of the user's own message.
+ * @param withSubagentBriefing - whether the banner also carries the rule the model
+ * is to pass into every `agent()` prompt it writes.
  * @returns the banner text.
  */
-export function buildBanner(): string {
-    return [
+export function buildBanner(withSubagentBriefing: boolean): string {
+    const lines = [
         "---",
         `${BANNER_OPEN} Decide first: if this message is a question, a trivial task, or`,
         "just talk (about workflows, this repo, or the tool itself), answer it directly and stay",
         "conversational — arming authorizes the tool, it does not force it. If it is a real,",
         "decomposable request to do work, handle it by calling the workflow tool: write a script",
         `that fans the task out across subagents via ${SCRIPT_SURFACE.join("/")}.`,
+    ];
+    // The briefing follows the sentence that tells the model to write the script,
+    // because that sentence is what creates the prompts the rule is about.
+    if (withSubagentBriefing) lines.push(SUBAGENT_BRIEFING);
+    lines.push(
         "Why this turn is armed: standing ultracode mode armed this turn (you did not",
         `explicitly ask for a workflow).${BANNER_CLOSE}`,
-    ].join("\n");
+    );
+    return lines.join("\n");
 }
 
 /**
@@ -137,10 +167,14 @@ export function buildInstruction(level: UltracodeLevel): string {
  * `high` or `ultra` asks of a workflow run. Later turns of the same level carry
  * {@link buildReminder} instead.
  * @param level - the armed level.
+ * @param withSubagentBriefing - whether the banner carries the subagent briefing.
  * @returns the banner followed by the level instruction.
  */
-export function buildInjection(level: UltracodeLevel): string {
-    return `${buildBanner()}\n\n${buildInstruction(level)}`;
+export function buildInjection(
+    level: UltracodeLevel,
+    withSubagentBriefing: boolean,
+): string {
+    return `${buildBanner(withSubagentBriefing)}\n\n${buildInstruction(level)}`;
 }
 
 /**
@@ -148,18 +182,24 @@ export function buildInjection(level: UltracodeLevel): string {
  *
  * It states what a later turn still needs and nothing else: the level in effect,
  * so the block it belongs to is unambiguous; the fact that the authorization
- * still stands; and the escape hatch, which is why a trivial turn is still
+ * still stands; the rule about briefing the agents a workflow starts, when the
+ * deployment asks for it; and the escape hatch, which is why a trivial turn is still
  * answered directly. Everything the block explains is normally still in the
  * session's history, so repeating it every turn would buy nothing while being
  * paid for on every request. The line is written to stand on its own anyway,
  * because compaction can remove the block it belongs to and a reminder referring
  * to an instruction the model can no longer read would be worse than no reminder.
  * @param level - the armed level.
+ * @param withSubagentBriefing - whether the line also carries the subagent briefing.
  * @returns the reminder, or the empty string for the `off` level.
  */
-export function buildReminder(level: UltracodeLevel): string {
+export function buildReminder(
+    level: UltracodeLevel,
+    withSubagentBriefing: boolean,
+): string {
     if (level === "off") return "";
-    return `---\n[workflows mode armed at ${level}; the workflow tool is authorized for real work, and a trivial turn is answered directly.]`;
+    const briefing = withSubagentBriefing ? REMINDER_BRIEFING : "";
+    return `---\n[workflows mode armed at ${level}; the workflow tool is authorized for real work${briefing}, and a trivial turn is answered directly.]`;
 }
 
 /**

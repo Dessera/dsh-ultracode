@@ -120,6 +120,12 @@ to answer directly when the turn turns out to be trivial. Whether a level has al
 lives in host memory and never enters the log, so a host restart or a resume injects the complete
 block once more rather than assuming the block is still in the context.
 
+While `conciseSubagentOutput` is on, which it is by default, the banner also carries the rule the
+model is to pass into every `agent()` prompt it writes: the context length is limited, so each
+agent is to keep its output brief and hand its material back through files rather than in its
+reply. The one-line reminder carries the same rule in its compressed form, so a turn whose context
+no longer holds the block still carries the rule.
+
 Both forms carry a source summary written by `injectionSummary` as `ultracode <level> armed this
 turn`, which is the line the fold reads back; the two forms share that one line.
 
@@ -233,12 +239,13 @@ for the case where the slot is rendered without this plugin's locale namespace r
 
 ## Configuration
 
-Two fields, both optional, both with defaults applied identically by `config.ts` and `schema.ts`.
+Three fields, all optional, all with defaults applied identically by `config.ts` and `schema.ts`.
 
-| Field              | Default    | Meaning                                                                                                                                                            |
-| ------------------ | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `workflowToolName` | `workflow` | The name under which this deployment registers the workflow tool. Visibility is resolved through this one name, and a blank value is refused at load time.         |
-| `language`         | `zh`       | The language of every notice the host prints. The available values are `zh` and `en`, and the loader refuses any other value when it validates the deployment row. |
+| Field                   | Default    | Meaning                                                                                                                                                                                                            |
+| ----------------------- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `workflowToolName`      | `workflow` | The name under which this deployment registers the workflow tool. Visibility is resolved through this one name, and a blank value is refused at load time.                                                         |
+| `language`              | `zh`       | The language of every notice the host prints. The available values are `zh` and `en`, and the loader refuses any other value when it validates the deployment row.                                                 |
+| `conciseSubagentOutput` | `true`     | Whether the injected text also carries the rule the model is to pass into every workflow agent's prompt: keep the agent's output brief, and have it hand its material back through files rather than in its reply. |
 
 The deployment row itself lives in `cordis.patch.yml`, which the package declares as its bundle
 patch. A profile can override the row by id.
