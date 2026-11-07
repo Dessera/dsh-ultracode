@@ -51,7 +51,9 @@ import {
     disarmSummary,
     injectionSummary,
 } from "./prompt.ts";
-import { ultracodeProjection, ULTRACODE_KEY } from "./projection.ts";
+import { ultracodeProjection } from "./projection.ts";
+import type { ProjectionState } from "./reducer.ts";
+import type { ProjectionHandle } from "@deepseek-ai/dsh-session-projection";
 import { classifyCommandArgs } from "./reducer.ts";
 import { Config } from "./schema.ts";
 import { UltracodeStateStore } from "./state.ts";
@@ -142,6 +144,10 @@ export const apply = (ctx: Context, rawConfig: unknown): (() => void) => {
     // deployment that mounts no projection registry must still arm turns. Every
     // read below tolerates its absence.
     const projections = contextService(ctx, "sessionProjections");
+    // 0.2.2 returns an awaitable handle instead of a synchronous disposer. The handle is the
+    // typed reader for this unit; the registry-level `stateOf(session, key)` is deprecated and
+    // untyped, so nothing here reads through it.
+    let projectionHandle: ProjectionHandle<ProjectionState> | null = null;
 
     if (commands === undefined) {
         throw new Error(
@@ -167,10 +173,9 @@ export const apply = (ctx: Context, rawConfig: unknown): (() => void) => {
      * @returns the folded client-visible state, or null when it cannot be read.
      */
     const foldWire = (agent: AgentLike): UltracodeWire | null => {
-        if (projections === undefined) return null;
+        if (projectionHandle === null) return null;
         try {
-            const value = projections.stateOf(agent.session, ULTRACODE_KEY);
-            const wire = value?.wire;
+            const wire = projectionHandle.stateOf(agent.session)?.wire;
             return wire !== undefined && isUltracodeLevel(wire.level)
                 ? wire
                 : null;
@@ -429,13 +434,22 @@ export const apply = (ctx: Context, rawConfig: unknown): (() => void) => {
     // is wrapped because a throw here would take the whole plugin row down,
     // including the command the user may need to recover with.
     if (projections !== undefined) {
-        try {
-            disposers.push(projections.register(ultracodeProjection()));
-        } catch (error) {
-            ctx.logger.warn(
-                `dsh-ultracode: registering the state projection failed: ${String(error)}`,
-            );
-        }
+        // Registration awaits now, so the handle lands after `apply` returns. Until it does, the
+        // fold reports "no state" and every caller keeps working through the command channel —
+        // the same degradation the plugin already had when the registry was absent.
+        projections
+            .register(ultracodeProjection())
+            .then((handle) => {
+                projectionHandle = handle;
+                disposers.push(() => {
+                    void handle.dispose();
+                });
+            })
+            .catch((error: unknown) => {
+                ctx.logger.warn(
+                    `dsh-ultracode: registering the state projection failed: ${String(error)}`,
+                );
+            });
     }
 
     return () => {
