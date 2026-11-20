@@ -18,10 +18,10 @@
  */
 /**
  * The unit definition's shape is the harness's own `ProjectionDefinition`,
- * narrowed to this plugin's key and state type. The two merge tables that key
- * lands in are declared by `./contract.ts` through the package's
- * pure-type outlet, and the outlet is what that file augments, so neither the
- * host-side context merges nor any runtime code reach either bundle.
+ * narrowed to this plugin's key and state type. The client-visible table that
+ * key lands in is declared by `./contract.ts` through the package's pure-type
+ * outlet, and the outlet is what that file augments, so neither the host-side
+ * context merges nor any runtime code reach either bundle.
  */
 import type { UltracodeProjectionUnit } from "./contract.ts";
 
@@ -39,17 +39,15 @@ import {
     type ProjectionState,
 } from "./reducer.ts";
 
-/** The projection key this unit owns, re-exported for the host entry. */
-export { ULTRACODE_KEY, ULTRACODE_STATE_VERSION };
-
 /**
  * The unit definition, in the shape the harness's registry accepts.
  *
  * The shape is the harness's own `ProjectionDefinition`, parameterized by this
- * plugin's key, so a change to the registry contract becomes a compile error
- * here rather than a runtime surprise. The state and view stay this plugin's own
- * types because `./contract.ts` registers this key in the registry's two
- * merge tables, which is what the parameterization resolves through.
+ * plugin's key and state, so a change to the registry contract becomes a compile
+ * error here rather than a runtime surprise. The state and view stay this
+ * plugin's own types because `./contract.ts` registers this key in the
+ * registry's client-visible table, which is what the parameterization resolves
+ * through.
  */
 export type UltracodeProjection = UltracodeProjectionUnit;
 
@@ -82,15 +80,14 @@ export const INITIAL_PROJECTION_STATE: ProjectionState =
 /**
  * Present a local state validator where the registry demands the schema library's type.
  *
- * The registry declares `stateSchema` and `viewSchema` as that library's type,
- * while this plugin ships plain objects that implement `parse` and nothing else
- * — deliberately, because the plugin's own wire shapes are what the registry
- * validates, a schema library would add a dependency for no further guarantee,
- * and a validator that rebuilt the view on every call would break the reference
- * reuse the registry's change detection depends on. The runtime contract holds
- * because the registry only ever calls `parse`. These two functions are the only
- * place the difference is bridged, and they are why no schema library appears
- * among the plugin's dependencies.
+ * The registry declares `stateSchema` and `viewSchema` as zod's `ZodType`, while
+ * this plugin ships plain objects that implement `parse` and nothing else —
+ * deliberately, because the plugin does not depend on the schema library: the
+ * registry only ever calls `parse`, and a validator that rebuilt the view on
+ * every call would break the reference reuse the registry's change detection
+ * depends on. Wiring a real `zod` schema would instead mean taking a dependency
+ * on the host's schema library to restate shapes this plugin already validates
+ * in one place. These two functions are where the difference is bridged.
  * @param schema - the plugin's own validator.
  * @returns the same object, typed as the registry declares it.
  */

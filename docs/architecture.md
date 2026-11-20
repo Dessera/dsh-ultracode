@@ -52,7 +52,7 @@ format, and the harness carries values between them.
 | `src/host/protocol.ts`            | The vocabulary both parts share: plugin id, command name, projection key, level vocabulary and aliases, rotation rule, wire shape, and the hand-written parsers.     |
 | `src/host/reducer.ts`             | The pure log fold (`applyProjectionEvent`) and the command-argument classifier (`classifyCommandArgs`).                                                              |
 | `src/host/projection.ts`          | Builds the projection unit definition that is handed to the registry.                                                                                                |
-| `src/host/contract.ts`            | Type-only module. Registers the `ultracode` key in the registry's two merge tables and pulls the host packages' context merges into the program.                     |
+| `src/host/contract.ts`            | Type-only module. Registers the `ultracode` key in the registry's client-visible table and pulls the host packages' context merges into the program.                 |
 | `src/host/state.ts`               | The per-session memory mirror (`UltracodeStateStore`), which also holds the pending disarm notice.                                                                   |
 | `src/host/prompt.ts`              | Assembly of the banner text, the per-level instruction blocks, the one-line reminder a repeat turn carries, and the notice a disarmed turn carries.                  |
 | `src/host/message.ts`             | Construction of the one frozen message the plugin injects.                                                                                                           |
@@ -179,7 +179,12 @@ on the registry owns delivery: it folds committed events through the unit, compu
 notifies its change feed when that view changes; the session-control channel turns that notification
 into a frame for every connected browser.
 
-Registration is best effort. A failed registration is logged and the rest of the plugin keeps working.
+Registration is best effort. A refused registration is logged and the rest of the plugin keeps working;
+the unit's own reader is then absent, so the plugin falls back to the in-process mirror everywhere the
+fold would have answered. The registration is awaited before the plugin reports loaded, because the
+registry requires that of a unit whose readers run during the same activation, and it yields a handle
+rather than a bare disposer: the handle folds a session's events on demand, which is what lets the
+synchronous banner decision read the level. Unloading releases the handle explicitly.
 
 ## The wire contract
 

@@ -1,7 +1,7 @@
 # Continuous integration.
 #
-# `check` runs the repository's own gate on both Node.js lines the package
-# declares: format checking, lint, type checking, build and tests.
+# `check` runs the repository's own gate: format checking, lint, type checking,
+# build and tests.
 #
 # The gate reads the harness installation the machine already has, so a checkout
 # that carries only this plugin reports the tests that need one as skips.
@@ -30,7 +30,7 @@ jobs:
         strategy:
             fail-fast: false
             matrix:
-                node: ["22.x", "24.x"]
+                node: ["24.x"]
         steps:
             - uses: actions/checkout@v7
 

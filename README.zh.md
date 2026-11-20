@@ -46,7 +46,7 @@ dsh plugin --profile web add github:Dessera/dsh-ultracode
 
 构建需要：
 
-- Node.js 22.19 及以上的 22.x 版本，或者 Node.js 24 及以上版本
+- Node.js 24.9 及以上版本
 - pnpm
 
 ```sh

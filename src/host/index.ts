@@ -29,6 +29,7 @@
  */
 import type { Context } from "@deepseek-ai/cordis";
 import type { UserMessage } from "@deepseek-ai/dsh-llm";
+import type { ProjectionHandle } from "@deepseek-ai/dsh-session-projection";
 
 import { resolveConfig } from "./config.ts";
 import {
@@ -51,8 +52,8 @@ import {
     disarmSummary,
     injectionSummary,
 } from "./prompt.ts";
-import { ultracodeProjection, ULTRACODE_KEY } from "./projection.ts";
-import { classifyCommandArgs } from "./reducer.ts";
+import { ultracodeProjection } from "./projection.ts";
+import { classifyCommandArgs, type ProjectionState } from "./reducer.ts";
 import { Config } from "./schema.ts";
 import { UltracodeStateStore } from "./state.ts";
 
@@ -120,17 +121,22 @@ function contextService<K extends keyof Context>(
 /**
  * Host plugin body.
  *
- * An arrow function on purpose: the loader treats a function with a prototype as
- * a class constructor and keeps that instance's own init hook rather than the
- * returned value, so the disposer below would be discarded. The listeners and the
- * command would still be released on unload, because each one is registered as an
- * effect of this plugin's fiber; the arrow keeps the release explicit and in one
- * place.
+ * An async arrow function on purpose. The loader treats a function with a
+ * prototype as a class constructor and keeps that instance's own init hook
+ * rather than the returned value, so the disposer below would be discarded; an
+ * async arrow has no prototype, and the loader awaits it, so the projection
+ * registration below settles before the plugin is considered loaded. The
+ * listeners and the command would still be released on unload, because each one
+ * is registered as an effect of this plugin's fiber; the arrow keeps the release
+ * explicit and in one place.
  * @param ctx - host context.
  * @param rawConfig - loader-provided configuration.
  * @returns a disposer that releases the command, the projection, and the listeners.
  */
-export const apply = (ctx: Context, rawConfig: unknown): (() => void) => {
+export const apply = async (
+    ctx: Context,
+    rawConfig: unknown,
+): Promise<() => Promise<void>> => {
     const config = resolveConfig(rawConfig);
     const t = NOTICES[config.language];
     const states = new UltracodeStateStore();
@@ -149,6 +155,18 @@ export const apply = (ctx: Context, rawConfig: unknown): (() => void) => {
         );
     }
 
+    /**
+     * The registration of this plugin's projection unit, once it is installed.
+     *
+     * The registry hands out a handle rather than a bare disposer: the handle is
+     * what folds a session's own events on demand, which is how a synchronous
+     * decision — banner injection — reads the level without waiting for the
+     * registry's change feed. It stays `undefined` when no registry is mounted or
+     * when registration was refused, and every read below then behaves as it did
+     * before the projection existed.
+     */
+    let projection: ProjectionHandle<ProjectionState> | undefined;
+
     /** Whether the configured workflow tool resolves for one agent's scope. */
     const workflowVisible = (agent: AgentLike): boolean =>
         tools !== undefined &&
@@ -157,23 +175,18 @@ export const apply = (ctx: Context, rawConfig: unknown): (() => void) => {
     /**
      * Read the state the log fold reports for one session, when it is readable.
      *
-     * The registry computes this without any process state, so the answer is the
-     * same one the browser is shown and the same one a resumed session starts
-     * from. A missing registry, an unregistered key, an error inside the fold, or
-     * a malformed answer all yield `null`, and every caller then behaves as it did
-     * before the projection existed — which is what keeps a projection problem
-     * from breaking the command channel.
+     * The handle folds with no process state, so the answer is the same one the
+     * browser is shown and the same one a resumed session starts from. Absent
+     * registration or an error inside the fold yields `null`, and every caller
+     * then behaves as it did before the projection existed — which is what keeps
+     * a projection problem from breaking the command channel.
      * @param agent - the session's live agent.
      * @returns the folded client-visible state, or null when it cannot be read.
      */
     const foldWire = (agent: AgentLike): UltracodeWire | null => {
-        if (projections === undefined) return null;
+        if (projection === undefined) return null;
         try {
-            const value = projections.stateOf(agent.session, ULTRACODE_KEY);
-            const wire = value?.wire;
-            return wire !== undefined && isUltracodeLevel(wire.level)
-                ? wire
-                : null;
+            return projection.stateOf(agent.session).wire;
         } catch (error) {
             ctx.logger.warn(
                 `dsh-ultracode: reading the folded state failed: ${String(error)}`,
@@ -426,11 +439,15 @@ export const apply = (ctx: Context, rawConfig: unknown): (() => void) => {
     // plugin has to poll, listen for focus, or answer a "what changed" question.
     // Its registration is best effort on purpose — a deployment without the
     // registry still gets the command channel and the banner injection — and it
-    // is wrapped because a throw here would take the whole plugin row down,
+    // is wrapped because a rejection here would take the whole plugin row down,
     // including the command the user may need to recover with.
+    //
+    // Registering is awaited before the plugin reports loaded, which the registry
+    // requires of any unit whose readers publish during this same activation: it
+    // is what makes `foldWire` above able to answer from the very first turn.
     if (projections !== undefined) {
         try {
-            disposers.push(projections.register(ultracodeProjection()));
+            projection = await projections.register(ultracodeProjection());
         } catch (error) {
             ctx.logger.warn(
                 `dsh-ultracode: registering the state projection failed: ${String(error)}`,
@@ -438,7 +455,7 @@ export const apply = (ctx: Context, rawConfig: unknown): (() => void) => {
         }
     }
 
-    return () => {
+    return async () => {
         for (const dispose of disposers.splice(0)) {
             try {
                 dispose();
@@ -447,6 +464,19 @@ export const apply = (ctx: Context, rawConfig: unknown): (() => void) => {
                     `dsh-ultracode: disposer failed: ${String(error)}`,
                 );
             }
+        }
+        // The handle's disposal unregisters the unit and settles once the
+        // registry has released it. The fiber owns the registration too, so this
+        // is the explicit release rather than the only one.
+        const registered = projection;
+        projection = undefined;
+        if (registered === undefined) return;
+        try {
+            await registered.dispose();
+        } catch (error) {
+            ctx.logger.warn(
+                `dsh-ultracode: releasing the state projection failed: ${String(error)}`,
+            );
         }
     };
 };

@@ -46,7 +46,7 @@ If pnpm reports an ignored build script, add the exact key it printed under `all
 
 A build needs:
 
-- Node.js 22.19 or newer within the 22.x line, or Node.js 24 or newer
+- Node.js 24.9 or newer
 - pnpm
 
 ```sh

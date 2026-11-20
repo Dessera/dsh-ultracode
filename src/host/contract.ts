@@ -1,19 +1,18 @@
 /**
  * Host-side contract: the harness types the host half names, and the one place
- * this plugin registers a key of its own.
+ * this plugin registers a client-visible key of its own.
  *
  * Nothing here restates a harness shape. Every host surface the plugin touches
  * has a published type, so this file imports those types and adds exactly one
- * thing of its own: the `ultracode` key in each of the two merge tables the
- * session projection registry is generic over. A renamed harness member then
- * becomes a compile error in the module that uses it, and the plugin keeps no
- * second copy of a shape it does not own.
+ * thing of its own: the `ultracode` key in the client-visible projection table.
+ * A renamed harness member then becomes a compile error in the module that uses
+ * it, and the plugin keeps no second copy of a shape it does not own.
  *
- * The two tables are declared in `@deepseek-ai/dsh-session-projection/types`, a
- * pure-type outlet that re-exports them without the package root's Cordis
+ * The table is declared in `@deepseek-ai/dsh-session-projection/types`, a
+ * pure-type outlet that re-exports it without the package root's Cordis
  * context merges. That outlet is the augmentation target below, so the
  * augmentation carries no host-side merges of its own. The unit contract itself
- * — `ProjectionDefinition`, which is generic over those tables — is published
+ * — `ProjectionDefinition`, which is generic over that table — is published
  * only from the package root, and that is where it is imported from.
  *
  * The module scope is load-bearing, not stylistic. A `declare module` written in
@@ -50,17 +49,6 @@ import type { UltracodeWire } from "./protocol.ts";
 import type { ProjectionState } from "./reducer.ts";
 
 declare module "@deepseek-ai/dsh-session-projection/types" {
-    interface SessionProjectionStateMap {
-        /**
-         * The state this plugin's fold keeps for one session.
-         *
-         * The value is the plugin's own `ProjectionState`, so the registry checks
-         * every registration and every read against the shape the reducer actually
-         * builds rather than against a copy of it. Host-only keys appear in this
-         * table alone.
-         */
-        ultracode: ProjectionState;
-    }
     interface SessionProjectionMap {
         /**
          * The value this plugin publishes to the browser.
@@ -74,14 +62,13 @@ declare module "@deepseek-ai/dsh-session-projection/types" {
 }
 
 /**
- * The projection unit contract, with this plugin's key applied.
+ * The projection unit contract, with this plugin's key and state applied.
  *
- * The registry's own `ProjectionDefinition` is generic over the two merge tables
- * above. Naming the key here — and the state type beside it, which is how the
- * registry's `register` overloads take it — is what makes `init`, `apply` and
- * `wire.view` check against the plugin's types instead of the empty tables'
- * `never`. Because the key is in both tables, `wire` is present rather than
- * `never`, which is the form a publishing unit registers.
+ * The registry's own `ProjectionDefinition` is generic over a key and that key's
+ * state type. Naming both here is what makes `init`, `apply` and `wire.view`
+ * check against the plugin's types instead of a widened default. Because the key
+ * is in the client-visible table above, `wire` is present rather than absent,
+ * which is the form a publishing unit registers.
  */
 export type UltracodeProjectionUnit = ProjectionDefinition<
     "ultracode",
